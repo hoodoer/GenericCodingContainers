@@ -1,0 +1,29 @@
+# syntax=docker/dockerfile:1
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+# Install system dependencies + Python toolchain
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 python3-pip python3-venv python3-full \
+    git curl ca-certificates ripgrep build-essential \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install the new Google Antigravity CLI globally
+RUN curl -fsSL https://antigravity.google/cli/install.sh | bash \
+    && mv /root/.local/bin/agy /usr/local/bin/agy
+
+# Common Python dev tools for your workflow
+RUN pip install --no-cache-dir --break-system-packages \
+    requests httpx pyyaml python-dotenv beautifulsoup4 lxml jinja2 pytest black ruff
+
+# Match host user structure
+RUN mkdir -p /home/user/project && chown -R 1000:1000 /home/user
+
+WORKDIR /home/user/project
+USER 1000
+
+# Hardcoded Ultimate YOLO mode: Bypasses all prompt blockades natively
+ENTRYPOINT ["agy", "--dangerously-skip-permissions"]
