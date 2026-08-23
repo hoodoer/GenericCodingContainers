@@ -1,0 +1,127 @@
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Core toolchain and dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    build-essential \
+    python3 \
+    python3-pip \
+    python3-venv \
+    sudo \
+    vim \
+    nano \
+    jq \
+    net-tools \
+    iputils-ping \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install OpenCode CLI
+RUN npm install -g opencode-ai
+
+# Non-root user setup
+RUN useradd -m -s /bin/bash developer && \
+    echo "developer ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+# Create the dynamic launcher script
+RUN cat << 'EOF' > /usr/local/bin/opencode-select
+#!/usr/bin/env bash
+
+LEMONADE_URL="http://127.0.0.1:13305/api/v1"
+
+echo "[*] Querying Lemonade Server at ${LEMONADE_URL}..."
+RESPONSE=$(curl -s --connect-timeout 5 "${LEMONADE_URL}/models")
+
+if [ -z "$RESPONSE" ] || ! echo "$RESPONSE" | jq -e '.data' > /dev/null 2>&1; then
+    echo "[-] Error: Could not connect to Lemonade Server at ${LEMONADE_URL}"
+    echo "    Make sure Lemonade is running and listening on port 13305."
+    exit 1
+fi
+
+# Filter for LLMs (exclude image/tts generators)
+mapfile -t MODELS < <(echo "$RESPONSE" | jq -r '.data[] | select((.labels // []) | (contains(["image"]) or contains(["tts"])) | not) | .id')
+
+if [ ${#MODELS[@]} -eq 0 ]; then
+    echo "[-] No compatible text models found in Lemonade."
+    exit 1
+fi
+
+echo ""
+echo "================================================================="
+echo "                   Available Lemonade Models                     "
+echo "================================================================="
+for i in "${!MODELS[@]}"; do
+    MODEL_ID="${MODELS[$i]}"
+    LABELS=$(echo "$RESPONSE" | jq -r --arg id "$MODEL_ID" '.data[] | select(.id == $id) | (.labels // []) | join(", ")')
+    SIZE=$(echo "$RESPONSE" | jq -r --arg id "$MODEL_ID" '.data[] | select(.id == $id) | .size // "N/A"')
+    printf " [%d] %-50s (%4s GB) [%s]\n" "$((i+1))" "$MODEL_ID" "$SIZE" "$LABELS"
+done
+echo "================================================================="
+echo ""
+
+while true; do
+    read -p "Select a model to load [1-${#MODELS[@]}]: " SELECTION
+    if [[ "$SELECTION" =~ ^[0-9]+$ ]] && [ "$SELECTION" -ge 1 ] && [ "$SELECTION" -le "${#MODELS[@]}" ]; then
+        SELECTED_MODEL="${MODELS[$((SELECTION-1))]}"
+        break
+    else
+        echo "Invalid selection. Enter a number between 1 and ${#MODELS[@]}."
+    fi
+done
+
+echo ""
+echo "[*] Selected: $SELECTED_MODEL"
+echo "[*] Warming up model in Lemonade (allowing up to 300s for cold-load)..."
+
+WARMUP=$(curl -s -X POST "${LEMONADE_URL}/chat/completions" \
+    -H "Content-Type: application/json" \
+    -d "{\"model\": \"$SELECTED_MODEL\", \"messages\": [{\"role\": \"user\", \"content\": \"ping\"}], \"max_tokens\": 1}" \
+    --max-time 300)
+
+if [ $? -ne 0 ]; then
+    echo "[-] Error: Model warmup timed out or failed."
+    exit 1
+fi
+
+# Dynamically generate ~/.config/opencode/opencode.json with all available models
+mkdir -p "$HOME/.config/opencode"
+
+echo "$RESPONSE" | jq --arg sel "$SELECTED_MODEL" --arg base "$LEMONADE_URL" '{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "lemonade": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Lemonade Server",
+      "options": {
+        "baseURL": $base,
+        "apiKey": "lemonade"
+      },
+      "models": (
+        [.data[] | select((.labels // []) | (contains(["image"]) or contains(["tts"])) | not)]
+        | reduce .[] as $m ({}; . + { ($m.id): { "name": $m.id } })
+      )
+    }
+  },
+  "model": ("lemonade/" + $sel)
+}' > "$HOME/.config/opencode/opencode.json"
+
+echo "[+] Configured OpenCode with active model: $SELECTED_MODEL"
+echo "[*] Starting OpenCode..."
+echo ""
+
+exec opencode "$@"
+EOF
+
+RUN chmod +x /usr/local/bin/opencode-select
+
+USER developer
+WORKDIR /workspace
+
+CMD ["/bin/bash"]
