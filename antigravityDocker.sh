@@ -13,6 +13,10 @@ while [[ "$1" == --* ]]; do
 done
 
 TARGET_DIR="${1:-.}"
+# Consume the directory argument so it isn't passed to the container
+if [ $# -gt 0 ]; then
+    shift
+fi
 TARGET_DIR="$(cd "$TARGET_DIR" && pwd)"
 
 if $REBUILD; then
