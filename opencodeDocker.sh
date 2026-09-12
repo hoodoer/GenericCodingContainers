@@ -44,5 +44,7 @@ echo "[*] Routing AI requests to Lemonade Server via host loopback (Port 13305)"
 docker run -it --rm \
     --name "$CONTAINER_NAME" \
     --add-host host.docker.internal:host-gateway \
+    --ipc=host \
+    -e OPENCODE_EXPERIMENTAL_PLAN_MODE=1 \
     -v "$TARGET_DIR:/workspace" \
     $IMAGE_NAME opencode-select

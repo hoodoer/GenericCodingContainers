@@ -26,9 +26,11 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 # Install OpenCode CLI
 RUN npm install -g opencode-ai
 
-# Non-root user setup
-RUN useradd -m -s /bin/bash developer && \
+# Non-root user setup (delete default ubuntu user so developer gets UID 1000)
+RUN touch /var/mail/ubuntu && userdel -r ubuntu 2>/dev/null || true && \
+    useradd -u 1000 -m -s /bin/bash developer && \
     echo "developer ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
 
 # Create the dynamic launcher script
 RUN cat << 'EOF' > /usr/local/bin/opencode-select
@@ -101,7 +103,10 @@ echo "$RESPONSE" | jq --arg sel "$SELECTED_MODEL" --arg base "$LEMONADE_URL" '{
       "name": "Lemonade Server",
       "options": {
         "baseURL": $base,
-        "apiKey": "lemonade"
+        "apiKey": "lemonade",
+	"timeout": 3000000,
+	"headerTimeout": 600000,
+	"chunkTimeout": 3000000
       },
       "models": (
         [.data[] | select((.labels // []) | (contains(["image"]) or contains(["tts"])) | not)]
@@ -113,6 +118,13 @@ echo "$RESPONSE" | jq --arg sel "$SELECTED_MODEL" --arg base "$LEMONADE_URL" '{
 }' > "$HOME/.config/opencode/opencode.json"
 
 echo "[+] Configured OpenCode with active model: $SELECTED_MODEL"
+
+# Route all plans and internal state into the mounted working directory
+rm -rf "$HOME/.local/share/opencode"
+mkdir -p /workspace/.opencode
+mkdir -p "$HOME/.local/share"
+ln -sfn /workspace/.opencode "$HOME/.local/share/opencode"
+
 echo "[*] Starting OpenCode..."
 echo ""
 
