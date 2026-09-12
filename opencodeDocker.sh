@@ -43,6 +43,6 @@ echo "[*] Routing AI requests to Lemonade Server via host loopback (Port 13305)"
 # Spin up using the network gateway mapping
 docker run -it --rm \
     --name "$CONTAINER_NAME" \
-    --network host \
+    --add-host host.docker.internal:host-gateway \
     -v "$TARGET_DIR:/workspace" \
-    $IMAGE_NAME /bin/bash
+    $IMAGE_NAME opencode-select

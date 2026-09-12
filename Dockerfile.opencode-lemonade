@@ -34,7 +34,7 @@ RUN useradd -m -s /bin/bash developer && \
 RUN cat << 'EOF' > /usr/local/bin/opencode-select
 #!/usr/bin/env bash
 
-LEMONADE_URL="http://127.0.0.1:13305/api/v1"
+LEMONADE_URL="http://host.docker.internal:13305/api/v1"
 
 echo "[*] Querying Lemonade Server at ${LEMONADE_URL}..."
 RESPONSE=$(curl -s --connect-timeout 5 "${LEMONADE_URL}/models")
