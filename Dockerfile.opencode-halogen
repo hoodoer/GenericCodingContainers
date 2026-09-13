@@ -1,0 +1,284 @@
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Core toolchain, dependencies, and shell linter
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    build-essential \
+    python3 \
+    python3-pip \
+    python3-venv \
+    sudo \
+    vim \
+    nano \
+    jq \
+    net-tools \
+    iputils-ping \
+    shellcheck \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install OpenCode CLI and AST tools (remove legacy Ubuntu /usr/bin/sg conflict)
+RUN rm -f /usr/bin/sg && npm install -g --force opencode-ai @ast-grep/cli
+
+# Install Python MCP SDK and Ruff linter
+RUN pip3 install --no-cache-dir --break-system-packages "mcp[cli]" ruff
+
+# Non-root user setup (developer gets UID 1000)
+RUN touch /var/mail/ubuntu && userdel -r ubuntu 2>/dev/null || true && \
+    useradd -u 1000 -m -s /bin/bash developer && \
+    echo "developer ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+# Create the execution wrapper (expanded budget for Flash-Next, strips ANSI formatting)
+RUN cat << 'EOF' > /usr/local/bin/safe-run
+#!/usr/bin/env bash
+MAX_LINES=250
+TIMEOUT=30s
+
+OUTPUT=$(NO_COLOR=1 TERM=dumb timeout "$TIMEOUT" "$@" 2>&1)
+STATUS=$?
+TOTAL_LINES=$(echo "$OUTPUT" | wc -l)
+
+if [ "$TOTAL_LINES" -gt "$MAX_LINES" ]; then
+    echo "$OUTPUT" | head -n "$MAX_LINES"
+    echo ""
+    echo "[!] Output truncated: ($TOTAL_LINES lines total). Displaying first $MAX_LINES lines to protect context budget."
+else
+    echo "$OUTPUT"
+fi
+
+if [ $STATUS -eq 124 ]; then
+    echo "[-] Execution timed out after $TIMEOUT."
+    exit 124
+fi
+
+exit $STATUS
+EOF
+
+RUN chmod +x /usr/local/bin/safe-run
+
+# Create the FastMCP structural search server
+RUN cat << 'EOF' > /usr/local/bin/codenav-mcp
+#!/usr/bin/env python3
+import sys
+import subprocess
+import json
+import ast
+from pathlib import Path
+from mcp.server.fastmcp import FastMCP
+
+mcp = FastMCP("code-nav")
+
+@mcp.tool()
+def code_outline(file_path: str) -> str:
+    """Extract classes, methods, and functions with line numbers from a file without dumping bodies. Use this to locate symbols while saving context."""
+    path = Path(file_path)
+    if not path.exists():
+        return f"Error: File '{file_path}' not found."
+    if path.suffix == ".py":
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            lines = []
+            for node in ast.iter_child_nodes(tree):
+                if isinstance(node, ast.ClassDef):
+                    lines.append(f"Line {node.lineno}: class {node.name}")
+                    for item in node.body:
+                        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                            args = [a.arg for a in item.args.args]
+                            lines.append(f"  Line {item.lineno}: def {item.name}({', '.join(args)})")
+                elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    args = [a.arg for a in node.args.args]
+                    lines.append(f"Line {node.lineno}: def {node.name}({', '.join(args)})")
+            return "\n".join(lines) if lines else "No top-level classes or functions found."
+        except Exception as e:
+            return f"Error parsing Python AST: {e}"
+    
+    res = subprocess.run(
+        ["ast-grep", "run", "--pattern", "function $NAME($$$)", "--json=compact", str(path)],
+        capture_output=True, text=True
+    )
+    return res.stdout or "No functions found."
+
+@mcp.tool()
+def ast_search(pattern: str, language: str = "python", path: str = "/workspace") -> str:
+    """Search code structurally using ast-grep patterns (e.g., 'class $A', 'def $B($$$)', '$X.update($$$)')."""
+    try:
+        cmd = ["ast-grep", "run", "--pattern", pattern, "--lang", language, "--json=compact", path]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if not res.stdout.strip():
+            return "No matches found."
+        matches = json.loads(res.stdout)
+        summary = []
+        for m in matches[:20]:
+            file = m.get("file", "")
+            line = m.get("range", {}).get("start", {}).get("line", 0) + 1
+            text = m.get("text", "").splitlines()[0]
+            summary.append(f"{file}:{line} -> {text}")
+        return "\n".join(summary)
+    except Exception as e:
+        return f"ast-grep error: {e}"
+
+if __name__ == "__main__":
+    mcp.run(transport="stdio")
+EOF
+
+RUN chmod +x /usr/local/bin/codenav-mcp
+
+# Create the dynamic launcher script configured for Halogen on port 8731
+RUN cat << 'EOF' > /usr/local/bin/opencode-select
+#!/usr/bin/env bash
+
+HALOGEN_URL="http://host.docker.internal:8731/v1"
+
+echo "[*] Querying Halogen Server at ${HALOGEN_URL}..."
+RESPONSE=$(curl -s --connect-timeout 5 "${HALOGEN_URL}/models")
+
+if [ -z "$RESPONSE" ] || ! echo "$RESPONSE" | jq -e '.data' > /dev/null 2>&1; then
+    echo "[-] Error: Could not connect to Halogen Server at ${HALOGEN_URL}"
+    echo "    Make sure Halogen is running and listening on port 8731."
+    exit 1
+fi
+
+mapfile -t MODELS < <(echo "$RESPONSE" | jq -r '.data[].id')
+
+if [ ${#MODELS[@]} -eq 0 ]; then
+    echo "[-] No models loaded in Halogen."
+    exit 1
+fi
+
+echo ""
+echo "================================================================="
+echo "                    Available Halogen Models                     "
+echo "================================================================="
+for i in "${!MODELS[@]}"; do
+    MODEL_ID="${MODELS[$i]}"
+    printf " [%d] %s\n" "$((i+1))" "$MODEL_ID"
+done
+echo "================================================================="
+echo ""
+
+if [ ${#MODELS[@]} -eq 1 ]; then
+    SELECTED_MODEL="${MODELS[0]}"
+    echo "[*] Automatically selected active model: $SELECTED_MODEL"
+else
+    while true; do
+        read -p "Select a model to load [1-${#MODELS[@]}]: " SELECTION
+        if [[ "$SELECTION" =~ ^[0-9]+$ ]] && [ "$SELECTION" -ge 1 ] && [ "$SELECTION" -le "${#MODELS[@]}" ]; then
+            SELECTED_MODEL="${MODELS[$((SELECTION-1))]}"
+            break
+        else
+            echo "Invalid selection. Enter a number between 1 and ${#MODELS[@]}."
+        fi
+    done
+fi
+
+# Dynamically generate ~/.config/opencode/opencode.json with 256k context
+mkdir -p "$HOME/.config/opencode"
+
+echo "$RESPONSE" | jq --arg sel "$SELECTED_MODEL" --arg base "$HALOGEN_URL" '{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "halogen": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Halogen Server",
+      "options": {
+        "baseURL": $base,
+        "apiKey": "halogen",
+        "temperature": 0.2,
+        "timeout": 600000,
+        "headerTimeout": 60000,
+        "chunkTimeout": 300000
+      },
+      "models": (
+        [.data[]]
+        | reduce .[] as $m ({}; . + {
+            ($m.id): {
+              "name": $m.id,
+              "limit": {
+                "context": 262144,
+                "output": 16384
+              }
+            }
+          })
+      )
+    }
+  },
+  "model": ("halogen/" + $sel),
+  "mcp": {
+    "codenav": {
+      "type": "local",
+      "command": ["python3", "/usr/local/bin/codenav-mcp"],
+      "enabled": true
+    }
+  },
+  "permission": {
+    "*": "allow",
+    "external_directory": "allow",
+    "doom_loop": "allow"
+  }
+}' > "$HOME/.config/opencode/opencode.json"
+
+echo "[+] Configured OpenCode with active model: $SELECTED_MODEL"
+
+# Auto-seed AGENTS.md in the mounted workspace with Flash-Next tuned directives
+if [ ! -f /workspace/AGENTS.md ]; then
+    cat << 'AGENTS_EOF' > /workspace/AGENTS.md
+# Workspace Directives
+
+## File System & Working Directory
+- The workspace root is `/workspace` (current directory `./`).
+- All created code, tests, and documents MUST be written inside `/workspace`.
+- NEVER create files in `/home/developer` or `~`.
+
+## Code Navigation & Inspection
+- Use `ast_search` or `code_outline` to orient within project structure and locate relevant entry points.
+- You have a full 256k context window; you may read complete source files when needed to trace logic and scope.
+- Verify imported modules, class hierarchies, and type definitions before making assumptions about signatures.
+
+## Code Quality, Verification & Safe Execution
+- For files under 200 lines, rewrite the file completely to prevent whitespace, patch, or indentation drift.
+- For files exceeding 200 lines, use targeted patch/edit operations.
+- Before executing Python scripts, check syntax and lint errors: `ruff check <path>`.
+- Use `safe-run` for all command, build, and test execution (e.g., `safe-run python3 -m unittest discover -s tests`).
+- Never execute curses or interactive TUI programs in bash; write and run headless unit tests instead.
+- Verify standard library APIs directly via bash when uncertain: `python3 -m pydoc <module.function>`.
+
+## Phase 1: High-Level Design (Planning)
+- When requested to design, plan, or architect a system:
+  1. Write the complete architectural specification directly into `./PLAN.md` using the file creation tool.
+  2. Structure `./PLAN.md` into discrete, numbered, testable milestones.
+  3. Keep in-chat summaries concise; let `./PLAN.md` hold the source-of-truth architectural specs.
+
+## Phase 2: Implementation (Building)
+- When directed to implement or execute a step from `./PLAN.md`:
+  1. Output a concise 1-2 sentence statement of intent or scratchpad reasoning, then immediately trigger your tool call.
+  2. Avoid lengthy conversational status updates or retrospectives ("Active", "Blocked", "Next Move").
+  3. Validate edits using unit tests before concluding the task turn.
+AGENTS_EOF
+    echo "[+] Seeded /workspace/AGENTS.md with operational rules"
+fi
+
+# Route internal OpenCode state into the mounted working directory
+rm -rf "$HOME/.local/share/opencode"
+mkdir -p /workspace/.opencode
+mkdir -p "$HOME/.local/share"
+ln -sfn /workspace/.opencode "$HOME/.local/share/opencode"
+
+echo "[*] Starting OpenCode..."
+echo ""
+
+exec opencode "$@"
+EOF
+
+RUN chmod +x /usr/local/bin/opencode-select
+
+USER developer
+WORKDIR /workspace
+
+CMD ["/bin/bash"]
