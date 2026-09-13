@@ -37,7 +37,7 @@ echo "[*] Routing AI requests to Halogen Server via host loopback (Port 8731)"
 
 docker run -it --rm \
     --name "$CONTAINER_NAME" \
-    --add-host host.docker.internal:host-gateway \
+    --network host \
     --ipc=host \
     -e OPENCODE_EXPERIMENTAL_PLAN_MODE=1 \
     -v "$TARGET_DIR:/workspace" \

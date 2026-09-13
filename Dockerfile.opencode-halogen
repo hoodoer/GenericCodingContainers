@@ -134,7 +134,7 @@ RUN chmod +x /usr/local/bin/codenav-mcp
 RUN cat << 'EOF' > /usr/local/bin/opencode-select
 #!/usr/bin/env bash
 
-HALOGEN_URL="http://host.docker.internal:8731/v1"
+HALOGEN_URL="${HALOGEN_URL:-http://127.0.0.1:8731/v1}"
 
 echo "[*] Querying Halogen Server at ${HALOGEN_URL}..."
 RESPONSE=$(curl -s --connect-timeout 5 "${HALOGEN_URL}/models")
