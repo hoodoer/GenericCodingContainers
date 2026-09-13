@@ -28,7 +28,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 RUN rm -f /usr/bin/sg && npm install -g --force opencode-ai @ast-grep/cli
 
 # Install Python MCP SDK and Ruff linter
-RUN pip3 install --no-cache-dir --break-system-packages "mcp[cli]" ruff
+RUN pip3 install --no-cache-dir --break-system-packages "mcp[cli]<2" ruff
 
 # Non-root user setup (developer gets UID 1000)
 RUN touch /var/mail/ubuntu && userdel -r ubuntu 2>/dev/null || true && \
@@ -130,7 +130,7 @@ EOF
 
 RUN chmod +x /usr/local/bin/codenav-mcp
 
-# Create the dynamic launcher script configured for Halogen on port 8731
+# Dynamic launcher configured for Halogen on port 8731
 RUN cat << 'EOF' > /usr/local/bin/opencode-select
 #!/usr/bin/env bash
 
@@ -178,7 +178,7 @@ else
     done
 fi
 
-# Dynamically generate ~/.config/opencode/opencode.json with 256k context
+# Dynamically generate ~/.config/opencode/opencode.json with valid MCP schema
 mkdir -p "$HOME/.config/opencode"
 
 echo "$RESPONSE" | jq --arg sel "$SELECTED_MODEL" --arg base "$HALOGEN_URL" '{
@@ -210,10 +210,13 @@ echo "$RESPONSE" | jq --arg sel "$SELECTED_MODEL" --arg base "$HALOGEN_URL" '{
     }
   },
   "model": ("halogen/" + $sel),
-  "mcp": {
+"mcp": {
     "codenav": {
       "type": "local",
-      "command": ["python3", "/usr/local/bin/codenav-mcp"],
+      "command": [
+        "python3",
+        "/usr/local/bin/codenav-mcp"
+      ],
       "enabled": true
     }
   },
