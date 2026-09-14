@@ -2,11 +2,20 @@ FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Core toolchain, dependencies, and shell linter
+# Core toolchain, C/C++ build tools, game libraries, Go, and headless virtual display
 RUN apt-get update && apt-get install -y \
     curl \
     git \
     build-essential \
+    cmake \
+    libraylib-dev \
+    libsdl2-dev \
+    golang-go \
+    xvfb \
+    libgl1 \
+    libglx-mesa0 \
+    libgl1-mesa-dri \
+    mesa-utils \
     python3 \
     python3-pip \
     python3-venv \
@@ -20,10 +29,24 @@ RUN apt-get update && apt-get install -y \
     ripgrep \
     && rm -rf /var/lib/apt/lists/*
 
+# Install Rust toolchain (globally accessible) with WebAssembly target
+ENV RUSTUP_HOME=/opt/rustup \
+    CARGO_HOME=/opt/cargo \
+    PATH="/opt/cargo/bin:${PATH}"
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal \
+    && rustup target add wasm32-unknown-unknown \
+    && chmod -R 777 /opt/rustup /opt/cargo
+
 # Install Node.js
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Playwright and headless Chromium dependencies globally
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+RUN npm install -g playwright \
+    && npx playwright install --with-deps chromium \
+    && chmod -R 777 /opt/ms-playwright
 
 # Install OpenCode CLI and AST tools (remove legacy Ubuntu /usr/bin/sg conflict)
 RUN rm -f /usr/bin/sg && npm install -g --force opencode-ai @ast-grep/cli
@@ -36,7 +59,7 @@ RUN touch /var/mail/ubuntu && userdel -r ubuntu 2>/dev/null || true && \
     useradd -u 1000 -m -s /bin/bash developer && \
     echo "developer ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
-# Create the execution wrapper (expanded budget for Flash-Next, strips ANSI formatting)
+# Create the execution wrapper (expanded budget, strips ANSI formatting)
 RUN cat << 'EOF' > /usr/local/bin/safe-run
 #!/usr/bin/env bash
 MAX_LINES=250
@@ -78,7 +101,7 @@ mcp = FastMCP("code-nav")
 
 @mcp.tool()
 def code_outline(file_path: str) -> str:
-    """Extract classes, methods, and functions with line numbers from a file without dumping bodies. Use this to locate symbols while saving context."""
+    """Extract classes, methods, and functions with line numbers from a file without dumping bodies."""
     path = Path(file_path)
     if not path.exists():
         return f"Error: File '{file_path}' not found."
@@ -108,7 +131,7 @@ def code_outline(file_path: str) -> str:
 
 @mcp.tool()
 def ast_search(pattern: str, language: str = "python", path: str = "/workspace") -> str:
-    """Search code structurally using ast-grep patterns (e.g., 'class $A', 'def $B($$$)', '$X.update($$$)')."""
+    """Search code structurally using ast-grep patterns."""
     try:
         cmd = ["ast-grep", "run", "--pattern", pattern, "--lang", language, "--json=compact", path]
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
@@ -179,7 +202,6 @@ else
     done
 fi
 
-# Dynamically generate ~/.config/opencode/opencode.json with valid MCP schema
 mkdir -p "$HOME/.config/opencode"
 
 echo "$RESPONSE" | jq --arg sel "$SELECTED_MODEL" --arg base "$HALOGEN_URL" '{
@@ -211,7 +233,7 @@ echo "$RESPONSE" | jq --arg sel "$SELECTED_MODEL" --arg base "$HALOGEN_URL" '{
     }
   },
   "model": ("halogen/" + $sel),
-"mcp": {
+  "mcp": {
     "codenav": {
       "type": "local",
       "command": [
@@ -230,7 +252,7 @@ echo "$RESPONSE" | jq --arg sel "$SELECTED_MODEL" --arg base "$HALOGEN_URL" '{
 
 echo "[+] Configured OpenCode with active model: $SELECTED_MODEL"
 
-# Auto-seed AGENTS.md in the mounted workspace with Flash-Next tuned directives
+# Auto-seed AGENTS.md in the mounted workspace with polyglot directives
 if [ ! -f /workspace/AGENTS.md ]; then
     cat << 'AGENTS_EOF' > /workspace/AGENTS.md
 # Workspace Directives
@@ -240,35 +262,43 @@ if [ ! -f /workspace/AGENTS.md ]; then
 - All created code, tests, and documents MUST be written inside `/workspace`.
 - NEVER create files in `/home/developer` or `~`.
 
+## Available Toolchains & Ecosystems
+- **Web / 3D**: Node.js (v20), npm, Playwright with Chromium (`PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright`). Excellent for Three.js, Babylon.js, or Vite-based projects.
+- **Rust**: `cargo`, `rustc`, with `wasm32-unknown-unknown` installed. Great for Macroquad, Bevy, or WebAssembly builds.
+- **C/C++**: `gcc`, `g++`, `cmake`, `make`, `libraylib-dev`, `libsdl2-dev`.
+- **Go**: `go` compiler and runtime.
+- **Python**: `python3`, `ruff` linter, standard testing tools.
+
+## Headless Execution & UI/Game Verification
+- The container is headless. To execute native graphical binaries (C++, Python Ursina/Pygame) without a physical display, prefix with `xvfb-run -a`:
+  `safe-run xvfb-run -a ./my_binary`
+- For web projects (Canvas/WebGL/Three.js), write a Playwright script to launch headless Chromium, inspect browser console logs for WebGL shader/matrix errors, and take screenshot captures:
+  `safe-run node check_render.js`
+
 ## Code Navigation & Inspection
-- Use `ast_search` or `code_outline` to orient within project structure and locate relevant entry points.
-- You have a full 256k context window; you may read complete source files when needed to trace logic and scope.
-- Verify imported modules, class hierarchies, and type definitions before making assumptions about signatures.
+- Use `ast_search` or `code_outline` to locate symbols while saving context.
+- You have a full 256k context window; read complete source files when tracing complex game logic.
 
 ## Code Quality, Verification & Safe Execution
-- For files under 200 lines, rewrite the file completely to prevent whitespace, patch, or indentation drift.
+- For files under 200 lines, rewrite completely to avoid patch/indentation drift.
 - For files exceeding 200 lines, use targeted patch/edit operations.
-- Before executing Python scripts, check syntax and lint errors: `ruff check <path>`.
-- Use `safe-run` for all command, build, and test execution (e.g., `safe-run python3 -m unittest discover -s tests`).
-- Never execute curses or interactive TUI programs in bash; write and run headless unit tests instead.
-- Verify standard library APIs directly via bash when uncertain: `python3 -m pydoc <module.function>`.
+- Always run static linting/type checks appropriate to the chosen language before running binaries (e.g., `ruff check`, `tsc`, `cargo check`).
+- Use `safe-run` for all command, build, and test executions.
 
 ## Phase 1: High-Level Design (Planning)
-- When requested to design, plan, or architect a system:
-  1. Write the complete architectural specification directly into `./PLAN.md` using the file creation tool.
-  2. Structure `./PLAN.md` into discrete, numbered, testable milestones.
-  3. Keep in-chat summaries concise; let `./PLAN.md` hold the source-of-truth architectural specs.
+- When requested to design or plan:
+  1. Write the architectural specification directly into `./PLAN.md`.
+  2. Select the optimal language/stack for the game (e.g., HTML5/Three.js for web accessibility, Raylib for native C++, Macroquad for Rust).
+  3. Divide `./PLAN.md` into discrete, testable milestones.
 
 ## Phase 2: Implementation (Building)
-- When directed to implement or execute a step from `./PLAN.md`:
-  1. Output a concise 1-2 sentence statement of intent or scratchpad reasoning, then immediately trigger your tool call.
-  2. Avoid lengthy conversational status updates or retrospectives ("Active", "Blocked", "Next Move").
-  3. Validate edits using unit tests before concluding the task turn.
+- When implementing:
+  1. Output a 1-2 sentence intent scratchpad, then trigger tool calls.
+  2. Validate implementations using unit tests, Playwright checks, or `xvfb-run` executions before concluding turns.
 AGENTS_EOF
-    echo "[+] Seeded /workspace/AGENTS.md with operational rules"
+    echo "[+] Seeded /workspace/AGENTS.md with polyglot operational rules"
 fi
 
-# Route internal OpenCode state into the mounted working directory
 rm -rf "$HOME/.local/share/opencode"
 mkdir -p /workspace/.opencode
 mkdir -p "$HOME/.local/share"
