@@ -8,8 +8,14 @@ RUN apt-get update && apt-get install -y \
     git \
     build-essential \
     cmake \
-    libraylib-dev \
     libsdl2-dev \
+    libasound2-dev \
+    libx11-dev \
+    libxrandr-dev \
+    libxi-dev \
+    libxcursor-dev \
+    libxinerama-dev \
+    libglu1-mesa-dev \
     golang-go \
     xvfb \
     libgl1 \
@@ -28,6 +34,8 @@ RUN apt-get update && apt-get install -y \
     shellcheck \
     ripgrep \
     && rm -rf /var/lib/apt/lists/*
+
+
 
 # Install Rust toolchain (globally accessible) with WebAssembly target
 ENV RUSTUP_HOME=/opt/rustup \
