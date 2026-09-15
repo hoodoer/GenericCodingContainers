@@ -218,19 +218,23 @@ echo "$RESPONSE" | jq --arg sel "$SELECTED_MODEL" --arg base "$HALOGEN_URL" '{
         "headerTimeout": 60000,
         "chunkTimeout": 300000
       },
-      "models": (
+"models": (
         [.data[]]
         | reduce .[] as $m ({}; . + {
             ($m.id): {
               "name": $m.id,
+              "attachment": true,
+              "modalities": {
+                "input": ["text", "image"],
+                "output": ["text"]
+              },
               "limit": {
                 "context": 262144,
                 "output": 16384
               }
             }
           })
-      )
-    }
+      )    }
   },
   "model": ("halogen/" + $sel),
   "mcp": {
