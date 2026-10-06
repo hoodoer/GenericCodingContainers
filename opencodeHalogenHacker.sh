@@ -42,17 +42,15 @@ TARGET_DIR=$(readlink -f "$TARGET_DIR")
 
 echo "[*] Launching OpenCode environment in $TARGET_DIR..."
 
-# Ensure the database volume exists so msf logs and db_nmap data persist
 podman volume create "$PG_VOLUME" >/dev/null 2>&1 || true
-
-# Clean up any stopped container with the same name before running
 podman rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
 
-# Run container securely:
-# 1. No port 4096 exposed to host
-# 2. opencode-select dynamically manages opencode.json directly inside /root/.config/opencode/
+# Run container securely with explicit networking capabilities for Nmap/Ligolo
 exec podman run -it --rm \
     --name "$CONTAINER_NAME" \
+    --cap-add=NET_RAW \
+    --cap-add=NET_ADMIN \
+    -p 4444-4450:4444-4450 \
     -e HALOGEN_URL="$HALOGEN_URL" \
     -v "$TARGET_DIR:/workspace:Z" \
     -v "$PG_VOLUME:/var/lib/postgresql:Z" \

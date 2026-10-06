@@ -44,7 +44,7 @@ if [ ! -f "$SCOPE_FILE" ]; then
 fi
 
 python3 - "$SCOPE_FILE" "$TARGET" << 'PYEOF'
-import ipaddress, re, sys
+import ipaddress, sys
 path, target = sys.argv[1], sys.argv[2].strip().lower()
 entries = [l.strip() for l in open(path)
            if l.strip() and not l.strip().startswith('#')]
@@ -92,7 +92,7 @@ fi
 exec safe-run $ALL_ARGS
 EOF
 
-# --- Stateless Metasploit wrapper
+# --- Stateless Metasploit wrapper (Removed -n flag)
 cat << 'EOF' > /usr/local/bin/msf-run
 #!/usr/bin/env bash
 set -uo pipefail
@@ -112,11 +112,11 @@ for s in "${SETS[@]}"; do CHAIN+="; ${s}"; done
 CHAIN+="; ${ACTION}"
 [ "$ACTION" != "check" ] && CHAIN+="; exit"
 
-echo "[*] msfconsole -q -n -x '${CHAIN}'" >&2
-NO_COLOR=1 TERM=dumb msfconsole -q -n -x "$CHAIN" 2>&1
+echo "[*] msfconsole -q -x '${CHAIN}'" >&2
+NO_COLOR=1 TERM=dumb msfconsole -q -x "$CHAIN" 2>&1
 EOF
 
-# --- Metasploit MCP Server
+# --- Metasploit MCP Server (Removed -n flag)
 cat << 'EOF' > /usr/local/bin/msf-mcp
 #!/usr/bin/env python3
 import re
@@ -130,7 +130,7 @@ TIMEOUT = 300
 def _msf(chain):
     try:
         r = subprocess.run(
-            ["msfconsole", "-q", "-n", "-x", chain + "; exit"],
+            ["msfconsole", "-q", "-x", chain + "; exit"],
             capture_output=True, text=True, timeout=TIMEOUT,
             env={"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": "/root",
                  "TERM": "dumb", "NO_COLOR": "1"},
@@ -189,7 +189,7 @@ if __name__ == "__main__":
     mcp.run(transport="stdio")
 EOF
 
-# --- Launcher Script
+# --- Launcher Script (Added DB YAML generation)
 cat << 'EOF' > /usr/local/bin/opencode-select
 #!/usr/bin/env bash
 HALOGEN_URL="${HALOGEN_URL:-http://host.containers.internal:8731/v1}"
@@ -198,13 +198,32 @@ echo "[*] Starting PostgreSQL..."
 pg_ctlcluster "$(pg_lsclusters -h | awk '{print $1}' | head -n1)" main start 2>/dev/null \
   || service postgresql start 2>/dev/null || true
 sleep 2
+
 if ! pg_isready -q; then
     echo "[!] PostgreSQL not reachable; db_nmap and db_* queries will fail."
 fi
+
 if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='msf'" 2>/dev/null | grep -q 1; then
     echo "[*] Initialising msf database role..."
     sudo -u postgres psql -c "CREATE ROLE msf LOGIN PASSWORD 'msf';" >/dev/null 2>&1
     sudo -u postgres psql -c "CREATE DATABASE msf OWNER msf;" >/dev/null 2>&1
+fi
+
+# Ensure Metasploit connects to the local database
+mkdir -p /root/.msf4
+if [ ! -f /root/.msf4/database.yml ]; then
+    echo "[*] Generating Metasploit database.yml..."
+    cat << 'DBEOF' > /root/.msf4/database.yml
+production:
+  adapter: postgresql
+  database: msf
+  username: msf
+  password: msf
+  host: 127.0.0.1
+  port: 5432
+  pool: 75
+  timeout: 5
+DBEOF
 fi
 
 echo "[*] Querying Halogen Server at ${HALOGEN_URL}..."
