@@ -463,6 +463,11 @@ mkdir -p "$HOME/.config/opencode"
 
 echo "$RESPONSE" | jq --arg sel "$SELECTED_MODEL" --arg base "$HALOGEN_URL" '{
   "$schema": "https://opencode.ai/config.json",
+  "compaction": {
+    "auto": true,
+    "keep": { "tokens": 24000 },
+    "buffer": 20000
+  },
   "provider": {
     "halogen": {
       "npm": "@ai-sdk/openai-compatible",
@@ -486,7 +491,7 @@ echo "$RESPONSE" | jq --arg sel "$SELECTED_MODEL" --arg base "$HALOGEN_URL" '{
                 "output": ["text"]
               },
               "limit": {
-                "context": 262144,
+                "context": 196608,
                 "output": 16384
               }
             }
