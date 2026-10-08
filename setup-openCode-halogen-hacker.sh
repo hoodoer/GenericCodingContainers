@@ -302,18 +302,18 @@ if ! xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; then
 fi
 
 # Kill any existing xfreerdp on this display
-pkill -f "xfreerdp.*${TARGET}" 2>/dev/null || true
+pkill -f "xfreerdp3.*${TARGET}" 2>/dev/null || true
 sleep 0.5
 
 echo "[*] Connecting to ${TARGET} as ${USER}..."
-xfreerdp /v:"${TARGET}" /u:"${USER}" /p:"${PASS}" \
+xfreerdp3 /v:"${TARGET}" /u:"${USER}" /p:"${PASS}" \
     /size:"${RES}" /cert:ignore /sec:any \
     /bpp:16 -wallpaper -aero -menu-anims -themes -fonts \
     +clipboard /dynamic-resolution \
     /log-level:ERROR &
 RDP_PID=$!
 echo "$RDP_PID" > /tmp/xfreerdp.pid
-echo "[+] xfreerdp launched (PID $RDP_PID). DISPLAY=$DISPLAY"
+echo "[+] xfreerdp3 launched (PID $RDP_PID). DISPLAY=$DISPLAY"
 echo "    Use: rdp-screenshot, rdp-type, rdp-disconnect"
 RDPEOF
 
@@ -383,8 +383,8 @@ RDPTYPE
 
 cat << 'RDPDC' > /usr/local/bin/rdp-disconnect
 #!/usr/bin/env bash
-echo "[*] Killing xfreerdp..."
-pkill -f xfreerdp 2>/dev/null || true
+echo "[*] Killing xfreerdp3..."
+pkill -f xfreerdp3 2>/dev/null || true
 echo "[*] Killing Xvfb..."
 if [ -f /tmp/xvfb.pid ]; then
     kill "$(cat /tmp/xvfb.pid)" 2>/dev/null || true

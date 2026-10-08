@@ -45,7 +45,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 #     tesseract   – OCR for reading RDP screen content
 #     x11-utils   – xdpyinfo, etc. for display introspection
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      freerdp2-x11 \
+      freerdp3-x11 \
       xvfb x11-utils x11-xserver-utils \
       xdotool wmctrl scrot \
       tesseract-ocr tesseract-ocr-eng \
