@@ -381,6 +381,150 @@ case "${1:-}" in
 esac
 RDPTYPE
 
+# --- Launcher Script (container entrypoint)
+cat << 'EOF' > /usr/local/bin/opencode-select
+#!/usr/bin/env bash
+HALOGEN_URL="${HALOGEN_URL:-http://host.containers.internal:8731/v1}"
+
+echo "[*] Starting PostgreSQL..."
+pg_ctlcluster "$(pg_lsclusters -h | awk '{print $1}' | head -n1)" main start 2>/dev/null \
+  || service postgresql start 2>/dev/null || true
+sleep 2
+
+if ! pg_isready -q; then
+    echo "[!] PostgreSQL not reachable; db_nmap and db_* queries will fail."
+fi
+
+if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='msf'" 2>/dev/null | grep -q 1; then
+    echo "[*] Initialising msf database role..."
+    sudo -u postgres psql -c "CREATE ROLE msf LOGIN PASSWORD 'msf';" >/dev/null 2>&1
+    sudo -u postgres psql -c "CREATE DATABASE msf OWNER msf;" >/dev/null 2>&1
+fi
+
+# Ensure Metasploit connects to the local database
+mkdir -p /root/.msf4
+if [ ! -f /root/.msf4/database.yml ]; then
+    echo "[*] Generating Metasploit database.yml..."
+    cat << 'DBEOF' > /root/.msf4/database.yml
+production:
+  adapter: postgresql
+  database: msf
+  username: msf
+  password: msf
+  host: 127.0.0.1
+  port: 5432
+  pool: 75
+  timeout: 5
+DBEOF
+fi
+
+echo "[*] Querying Halogen Server at ${HALOGEN_URL}..."
+RESPONSE=$(curl -s --connect-timeout 5 "${HALOGEN_URL}/models")
+if [ -z "$RESPONSE" ] || ! echo "$RESPONSE" | jq -e '.data' > /dev/null 2>&1; then
+    echo "[-] Error: could not reach Halogen at ${HALOGEN_URL}"
+    echo "    Make sure Halogen is running and listening on port 8731,"
+    echo "    and your SSH tunnel is bound to 0.0.0.0."
+    exit 1
+fi
+
+mapfile -t MODELS < <(echo "$RESPONSE" | jq -r '.data[].id')
+if [ ${#MODELS[@]} -eq 0 ]; then
+    echo "[-] No models loaded in Halogen."
+    exit 1
+fi
+
+echo ""
+echo "================================================================="
+echo "                    Available Halogen Models                     "
+echo "================================================================="
+for i in "${!MODELS[@]}"; do
+    MODEL_ID="${MODELS[$i]}"
+    printf " [%d] %s\n" "$((i+1))" "$MODEL_ID"
+done
+echo "================================================================="
+echo ""
+
+if [ ${#MODELS[@]} -eq 1 ]; then
+    SELECTED_MODEL="${MODELS[0]}"
+    echo "[*] Automatically selected active model: $SELECTED_MODEL"
+else
+    while true; do
+        read -p "Select a model to load [1-${#MODELS[@]}]: " SELECTION
+        if [[ "$SELECTION" =~ ^[0-9]+$ ]] && [ "$SELECTION" -ge 1 ] && [ "$SELECTION" -le "${#MODELS[@]}" ]; then
+            SELECTED_MODEL="${MODELS[$((SELECTION-1))]}"
+            break
+        else
+            echo "Invalid selection. Enter a number between 1 and ${#MODELS[@]}."
+        fi
+    done
+fi
+
+mkdir -p "$HOME/.config/opencode"
+
+echo "$RESPONSE" | jq --arg sel "$SELECTED_MODEL" --arg base "$HALOGEN_URL" '{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "halogen": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Halogen Server",
+      "options": {
+        "baseURL": $base,
+        "apiKey": "halogen",
+        "temperature": 0.2,
+        "timeout": 600000,
+        "headerTimeout": 60000,
+        "chunkTimeout": 300000
+      },
+      "models": (
+        [.data[]]
+        | reduce .[] as $m ({}; . + {
+            ($m.id): {
+              "name": $m.id,
+              "attachment": true,
+              "modalities": {
+                "input": ["text", "image"],
+                "output": ["text"]
+              },
+              "limit": {
+                "context": 262144,
+                "output": 16384
+              }
+            }
+          })
+      )
+    }
+  },
+  "model": ("halogen/" + $sel),
+  "mcp": {
+    "metasploit": {
+      "type": "local",
+      "command": [
+        "/usr/local/bin/msf-mcp"
+      ],
+      "enabled": true
+    }
+  },
+  "permission": {
+    "*": "allow",
+    "external_directory": "allow",
+    "doom_loop": "allow"
+  }
+}' > "$HOME/.config/opencode/opencode.json"
+
+echo "[+] Configured OpenCode with active model: $SELECTED_MODEL"
+
+# Preserve sessions inside workspace
+rm -rf "$HOME/.local/share/opencode"
+mkdir -p /workspace/.opencode
+mkdir -p "$HOME/.local/share"
+ln -sfn /workspace/.opencode "$HOME/.local/share/opencode"
+
+echo "[*] Starting OpenCode..."
+echo ""
+
+exec opencode "$@"
+EOF
+
 cat << 'RDPDC' > /usr/local/bin/rdp-disconnect
 #!/usr/bin/env bash
 echo "[*] Killing xfreerdp3..."
