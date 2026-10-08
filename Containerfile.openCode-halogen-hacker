@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       socat netcat-openbsd ncat dnsutils whois tcpdump arp-scan macchanger \
       postgresql postgresql-client sqlite3 \
       seclists wordlists \
+      openssh-client tmux proxychains4 \
     && rm -rf /var/lib/apt/lists/*
 
 # --- External recon + web application surface
@@ -23,6 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ffuf feroxbuster gobuster dirb dirsearch wfuzz nikto sqlmap \
       whatweb wafw00f testssl.sh \
       hydra john hashcat \
+      exploitdb \
     && rm -rf /var/lib/apt/lists/*
 
 # --- Exploitation + Active Directory
@@ -31,10 +33,37 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       netexec python3-impacket impacket-scripts \
       ldap-utils krb5-user smbclient cifs-utils winbind \
       responder mitm6 \
+      evil-winrm \
     && rm -rf /var/lib/apt/lists/*
 
+# --- RDP / GUI automation layer.
+#     xfreerdp    – headless RDP client
+#     Xvfb        – virtual framebuffer so xfreerdp has a DISPLAY
+#     xdotool     – keystroke / mouse injection
+#     wmctrl      – window focus management
+#     scrot       – screenshot capture
+#     tesseract   – OCR for reading RDP screen content
+#     x11-utils   – xdpyinfo, etc. for display introspection
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      freerdp2-x11 \
+      xvfb x11-utils x11-xserver-utils \
+      xdotool wmctrl scrot \
+      tesseract-ocr tesseract-ocr-eng \
+      imagemagick \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- OCR-B font (used by MRZ / passport-style puzzles)
+RUN mkdir -p /usr/share/fonts/truetype/ocrb && \
+    curl -fsSL "https://raw.githubusercontent.com/nicholasgasior/gofont-ocr-b/master/OCRB-Regular.otf" \
+      -o /usr/share/fonts/truetype/ocrb/OCRB-Regular.otf && \
+    fc-cache -f /usr/share/fonts/truetype/ocrb || \
+    echo "WARN: OCR-B font download failed; MRZ tasks may need manual font install"
+
+# --- Python tooling
 RUN pip3 install --no-cache-dir --break-system-packages \
       "mcp[cli]<2" certipy-ad bloodhound ldap3 requests \
+      aardwolf \
+      pyrdp \
     && pip3 cache purge
 
 RUN curl -fsSL https://raw.githubusercontent.com/dirkjanm/krbrelayx/master/dnstool.py -o /usr/local/bin/dnstool.py \

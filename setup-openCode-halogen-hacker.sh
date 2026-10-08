@@ -92,7 +92,7 @@ fi
 exec safe-run $ALL_ARGS
 EOF
 
-# --- Stateless Metasploit wrapper (Removed -n flag)
+# --- Stateless Metasploit wrapper
 cat << 'EOF' > /usr/local/bin/msf-run
 #!/usr/bin/env bash
 set -uo pipefail
@@ -116,7 +116,7 @@ echo "[*] msfconsole -q -x '${CHAIN}'" >&2
 NO_COLOR=1 TERM=dumb msfconsole -q -x "$CHAIN" 2>&1
 EOF
 
-# --- Metasploit MCP Server (Removed -n flag)
+# --- Metasploit MCP Server
 cat << 'EOF' > /usr/local/bin/msf-mcp
 #!/usr/bin/env python3
 import re
@@ -189,153 +189,218 @@ if __name__ == "__main__":
     mcp.run(transport="stdio")
 EOF
 
-# --- Launcher Script (Added DB YAML generation)
-cat << 'EOF' > /usr/local/bin/opencode-select
+# =======================================================================
+# --- Cleanup script: wipe workspace data + drop/recreate MSF database
+# =======================================================================
+cat << 'CLEANEOF' > /usr/local/bin/cleanup
 #!/usr/bin/env bash
-HALOGEN_URL="${HALOGEN_URL:-http://host.containers.internal:8731/v1}"
+set -e
 
-echo "[*] Starting PostgreSQL..."
-pg_ctlcluster "$(pg_lsclusters -h | awk '{print $1}' | head -n1)" main start 2>/dev/null \
-  || service postgresql start 2>/dev/null || true
-sleep 2
+RED='\033[0;31m'
+GRN='\033[0;32m'
+YLW='\033[1;33m'
+RST='\033[0m'
 
-if ! pg_isready -q; then
-    echo "[!] PostgreSQL not reachable; db_nmap and db_* queries will fail."
-fi
-
-if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='msf'" 2>/dev/null | grep -q 1; then
-    echo "[*] Initialising msf database role..."
-    sudo -u postgres psql -c "CREATE ROLE msf LOGIN PASSWORD 'msf';" >/dev/null 2>&1
-    sudo -u postgres psql -c "CREATE DATABASE msf OWNER msf;" >/dev/null 2>&1
-fi
-
-# Ensure Metasploit connects to the local database
-mkdir -p /root/.msf4
-if [ ! -f /root/.msf4/database.yml ]; then
-    echo "[*] Generating Metasploit database.yml..."
-    cat << 'DBEOF' > /root/.msf4/database.yml
-production:
-  adapter: postgresql
-  database: msf
-  username: msf
-  password: msf
-  host: 127.0.0.1
-  port: 5432
-  pool: 75
-  timeout: 5
-DBEOF
-fi
-
-echo "[*] Querying Halogen Server at ${HALOGEN_URL}..."
-RESPONSE=$(curl -s --connect-timeout 5 "${HALOGEN_URL}/models")
-if [ -z "$RESPONSE" ] || ! echo "$RESPONSE" | jq -e '.data' > /dev/null 2>&1; then
-    echo "[-] Error: could not reach Halogen at ${HALOGEN_URL}"
-    echo "    Make sure Halogen is running and listening on port 8731,"
-    echo "    and your SSH tunnel is bound to 0.0.0.0."
-    exit 1
-fi
-
-mapfile -t MODELS < <(echo "$RESPONSE" | jq -r '.data[].id')
-if [ ${#MODELS[@]} -eq 0 ]; then
-    echo "[-] No models loaded in Halogen."
-    exit 1
-fi
-
-echo ""
-echo "================================================================="
-echo "                    Available Halogen Models                     "
-echo "================================================================="
-for i in "${!MODELS[@]}"; do
-    MODEL_ID="${MODELS[$i]}"
-    printf " [%d] %s\n" "$((i+1))" "$MODEL_ID"
+FORCE=0
+for arg in "$@"; do
+    case "$arg" in
+        -f|--force) FORCE=1 ;;
+        -h|--help)
+            echo "Usage: cleanup [-f|--force]"
+            echo "  Wipes /workspace contents and resets the Metasploit database."
+            echo "  -f  Skip confirmation prompt."
+            exit 0
+            ;;
+    esac
 done
-echo "================================================================="
-echo ""
 
-if [ ${#MODELS[@]} -eq 1 ]; then
-    SELECTED_MODEL="${MODELS[0]}"
-    echo "[*] Automatically selected active model: $SELECTED_MODEL"
-else
-    while true; do
-        read -p "Select a model to load [1-${#MODELS[@]}]: " SELECTION
-        if [[ "$SELECTION" =~ ^[0-9]+$ ]] && [ "$SELECTION" -ge 1 ] && [ "$SELECTION" -le "${#MODELS[@]}" ]; then
-            SELECTED_MODEL="${MODELS[$((SELECTION-1))]}"
-            break
-        else
-            echo "Invalid selection. Enter a number between 1 and ${#MODELS[@]}."
-        fi
-    done
+if [ "$FORCE" -ne 1 ]; then
+    echo -e "${YLW}[!] This will DESTROY:${RST}"
+    echo "      - All files under /workspace  (loot, logs, AGENTS.md, scope.txt, ...)"
+    echo "      - The entire Metasploit database  (hosts, services, creds, loot)"
+    echo ""
+    read -p "    Type 'yes' to confirm: " CONFIRM
+    if [ "$CONFIRM" != "yes" ]; then
+        echo "[-] Aborted."
+        exit 1
+    fi
 fi
 
-mkdir -p "$HOME/.config/opencode"
+# --- 1. Reset Metasploit database ---
+echo -e "${YLW}[*] Resetting Metasploit database...${RST}"
+if pg_isready -q 2>/dev/null; then
+    # Kill any lingering msf connections
+    sudo -u postgres psql -c \
+      "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='msf' AND pid <> pg_backend_pid();" \
+      >/dev/null 2>&1 || true
+    sudo -u postgres dropdb --if-exists msf 2>/dev/null || true
+    sudo -u postgres createdb -O msf msf 2>/dev/null || true
+    echo -e "${GRN}[+] MSF database dropped and recreated.${RST}"
+else
+    echo "[!] PostgreSQL not running. Starting it..."
+    pg_ctlcluster "$(pg_lsclusters -h | awk '{print $1}' | head -n1)" main start 2>/dev/null \
+      || service postgresql start 2>/dev/null || true
+    sleep 2
+    if pg_isready -q 2>/dev/null; then
+        sudo -u postgres psql -c \
+          "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='msf' AND pid <> pg_backend_pid();" \
+          >/dev/null 2>&1 || true
+        sudo -u postgres dropdb --if-exists msf 2>/dev/null || true
+        sudo -u postgres createdb -O msf msf 2>/dev/null || true
+        echo -e "${GRN}[+] MSF database dropped and recreated.${RST}"
+    else
+        echo -e "${RED}[-] Could not start PostgreSQL. Database NOT cleaned.${RST}"
+    fi
+fi
 
-echo "$RESPONSE" | jq --arg sel "$SELECTED_MODEL" --arg base "$HALOGEN_URL" '{
-  "$schema": "https://opencode.ai/config.json",
-  "provider": {
-    "halogen": {
-      "npm": "@ai-sdk/openai-compatible",
-      "name": "Halogen Server",
-      "options": {
-        "baseURL": $base,
-        "apiKey": "halogen",
-        "temperature": 0.2,
-        "timeout": 600000,
-        "headerTimeout": 60000,
-        "chunkTimeout": 300000
-      },
-      "models": (
-        [.data[]]
-        | reduce .[] as $m ({}; . + {
-            ($m.id): {
-              "name": $m.id,
-              "attachment": true,
-              "modalities": {
-                "input": ["text", "image"],
-                "output": ["text"]
-              },
-              "limit": {
-                "context": 262144,
-                "output": 16384
-              }
-            }
-          })
-      )
-    }
-  },
-  "model": ("halogen/" + $sel),
-  "mcp": {
-    "metasploit": {
-      "type": "local",
-      "command": [
-        "/usr/local/bin/msf-mcp"
-      ],
-      "enabled": true
-    }
-  },
-  "permission": {
-    "*": "allow",
-    "external_directory": "allow",
-    "doom_loop": "allow"
-  }
-}' > "$HOME/.config/opencode/opencode.json"
+# --- 2. Wipe workspace ---
+echo -e "${YLW}[*] Cleaning /workspace...${RST}"
+# Remove everything except hidden mount metadata
+find /workspace -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
+echo -e "${GRN}[+] /workspace wiped.${RST}"
 
-echo "[+] Configured OpenCode with active model: $SELECTED_MODEL"
+# --- 3. Clear OpenCode session state ---
+echo -e "${YLW}[*] Clearing OpenCode sessions...${RST}"
+rm -rf "$HOME/.local/share/opencode" /workspace/.opencode 2>/dev/null || true
+echo -e "${GRN}[+] Sessions cleared.${RST}"
 
-# Preserve sessions inside workspace
-rm -rf "$HOME/.local/share/opencode"
-mkdir -p /workspace/.opencode
-mkdir -p "$HOME/.local/share"
-ln -sfn /workspace/.opencode "$HOME/.local/share/opencode"
-
-echo "[*] Starting OpenCode..."
 echo ""
+echo -e "${GRN}[+] Cleanup complete. Ready for the next challenge.${RST}"
+CLEANEOF
 
-exec opencode "$@"
-EOF
+# =======================================================================
+# --- Xvfb + RDP helper: start virtual display and connect to target
+# =======================================================================
+cat << 'RDPEOF' > /usr/local/bin/rdp-connect
+#!/usr/bin/env bash
+set -eo pipefail
+# Usage: rdp-connect <target_ip> <user> <password> [resolution]
+#   Starts Xvfb if needed, connects xfreerdp headlessly.
+#   Screenshots: rdp-screenshot
+#   Keystrokes:  rdp-type "commands here"
+#   Kill:        rdp-disconnect
+
+TARGET="${1:?Usage: rdp-connect <ip> <user> <pass> [WxH]}"
+USER="${2:?}"
+PASS="${3:?}"
+RES="${4:-1024x768}"
+DISPLAY_NUM="${RDP_DISPLAY:-99}"
+export DISPLAY=":${DISPLAY_NUM}"
+
+# Start Xvfb if not already running on this display
+if ! xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; then
+    echo "[*] Starting Xvfb on $DISPLAY (${RES})..."
+    Xvfb "$DISPLAY" -screen 0 "${RES}x24" -ac +extension GLX +render -noreset &
+    XVFB_PID=$!
+    echo "$XVFB_PID" > /tmp/xvfb.pid
+    sleep 1
+    if ! kill -0 "$XVFB_PID" 2>/dev/null; then
+        echo "[-] Xvfb failed to start."
+        exit 1
+    fi
+    echo "[+] Xvfb running (PID $XVFB_PID)"
+fi
+
+# Kill any existing xfreerdp on this display
+pkill -f "xfreerdp.*${TARGET}" 2>/dev/null || true
+sleep 0.5
+
+echo "[*] Connecting to ${TARGET} as ${USER}..."
+xfreerdp /v:"${TARGET}" /u:"${USER}" /p:"${PASS}" \
+    /size:"${RES}" /cert:ignore /sec:any \
+    /bpp:16 -wallpaper -aero -menu-anims -themes -fonts \
+    +clipboard /dynamic-resolution \
+    /log-level:ERROR &
+RDP_PID=$!
+echo "$RDP_PID" > /tmp/xfreerdp.pid
+echo "[+] xfreerdp launched (PID $RDP_PID). DISPLAY=$DISPLAY"
+echo "    Use: rdp-screenshot, rdp-type, rdp-disconnect"
+RDPEOF
+
+cat << 'RDPSCR' > /usr/local/bin/rdp-screenshot
+#!/usr/bin/env bash
+# Take a screenshot of the RDP session. Optionally OCR it.
+DISPLAY_NUM="${RDP_DISPLAY:-99}"
+export DISPLAY=":${DISPLAY_NUM}"
+OUTDIR="/workspace/loot/screenshots"
+mkdir -p "$OUTDIR"
+STAMP=$(date +%Y%m%d-%H%M%S)
+IMG="$OUTDIR/rdp-${STAMP}.png"
+
+if ! xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; then
+    echo "[-] No display at $DISPLAY. Run rdp-connect first."
+    exit 1
+fi
+
+scrot -d 1 "$IMG" 2>/dev/null || import -window root "$IMG"
+echo "[+] Screenshot: $IMG"
+
+# If --ocr flag is passed, run tesseract
+if [ "${1:-}" = "--ocr" ] || [ "${1:-}" = "-o" ]; then
+    TXT="${IMG%.png}.txt"
+    tesseract "$IMG" "${IMG%.png}" --psm 6 2>/dev/null
+    if [ -f "$TXT" ]; then
+        echo "--- OCR output ---"
+        cat "$TXT"
+        echo "--- end OCR ---"
+    fi
+fi
+RDPSCR
+
+cat << 'RDPTYPE' > /usr/local/bin/rdp-type
+#!/usr/bin/env bash
+# Send keystrokes to the RDP window.
+# Usage: rdp-type "text to type"
+#        rdp-type --key Return      (send a single key)
+#        rdp-type --cmd "whoami"    (type + press Enter)
+DISPLAY_NUM="${RDP_DISPLAY:-99}"
+export DISPLAY=":${DISPLAY_NUM}"
+
+if ! xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; then
+    echo "[-] No display at $DISPLAY. Run rdp-connect first."
+    exit 1
+fi
+
+# Small delay to make sure window has focus
+sleep 0.3
+
+case "${1:-}" in
+    --key)
+        shift
+        xdotool key "$@"
+        ;;
+    --cmd)
+        shift
+        xdotool type --clearmodifiers --delay 30 "$*"
+        sleep 0.1
+        xdotool key Return
+        ;;
+    *)
+        xdotool type --clearmodifiers --delay 30 "$*"
+        ;;
+esac
+RDPTYPE
+
+cat << 'RDPDC' > /usr/local/bin/rdp-disconnect
+#!/usr/bin/env bash
+echo "[*] Killing xfreerdp..."
+pkill -f xfreerdp 2>/dev/null || true
+echo "[*] Killing Xvfb..."
+if [ -f /tmp/xvfb.pid ]; then
+    kill "$(cat /tmp/xvfb.pid)" 2>/dev/null || true
+    rm -f /tmp/xvfb.pid
+fi
+pkill -f Xvfb 2>/dev/null || true
+rm -f /tmp/xfreerdp.pid
+echo "[+] RDP session torn down."
+RDPDC
 
 # --- Finalize Permissions
 chmod +x /usr/local/bin/safe-run /usr/local/bin/scope_check \
          /usr/local/bin/run_guarded /usr/local/bin/msf-run \
-         /usr/local/bin/msf-mcp /usr/local/bin/opencode-select
+         /usr/local/bin/msf-mcp /usr/local/bin/opencode-select \
+         /usr/local/bin/cleanup \
+         /usr/local/bin/rdp-connect /usr/local/bin/rdp-screenshot \
+         /usr/local/bin/rdp-type /usr/local/bin/rdp-disconnect
 
 echo "[+] Agent tools installed successfully."
