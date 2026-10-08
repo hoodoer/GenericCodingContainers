@@ -57,6 +57,9 @@ if [ $CLEAN -eq 1 ]; then
     echo "[*] Destroying PostgreSQL volume ($PG_VOLUME)..."
     podman volume rm -f "$PG_VOLUME" >/dev/null 2>&1 || true
     echo "[+] Volume removed. A fresh volume will be created on launch."
+    echo ""
+    echo "[+] Clean complete. Run without --clean to start a fresh session."
+    exit 0
 fi
 
 # --- Generate AGENTS.md dynamically ---
