@@ -463,6 +463,9 @@ mkdir -p "$HOME/.config/opencode"
 
 echo "$RESPONSE" | jq --arg sel "$SELECTED_MODEL" --arg base "$HALOGEN_URL" '{
   "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    "/workspace/AGENTS.md"
+  ],
   "compaction": {
     "auto": true,
     "keep": { "tokens": 24000 },
@@ -524,9 +527,10 @@ mkdir -p /workspace/.opencode
 mkdir -p "$HOME/.local/share"
 ln -sfn /workspace/.opencode "$HOME/.local/share/opencode"
 
-echo "[*] Starting OpenCode..."
+echo "[*] Starting OpenCode in /workspace..."
 echo ""
 
+cd /workspace || exit 1
 exec opencode "$@"
 EOF
 

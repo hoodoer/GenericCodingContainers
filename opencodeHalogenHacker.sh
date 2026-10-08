@@ -293,6 +293,7 @@ exec podman run -it --rm \
     --cap-add=NET_RAW \
     --cap-add=NET_ADMIN \
     -p 4444-4450:4444-4450 \
+    -w /workspace \
     -e HALOGEN_URL="$HALOGEN_URL" \
     -v "$TARGET_DIR:/workspace:Z" \
     -v "$PG_VOLUME:/var/lib/postgresql:Z" \
