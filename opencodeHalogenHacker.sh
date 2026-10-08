@@ -34,15 +34,10 @@ if [ $REBUILD -eq 1 ]; then
     exit 0
 fi
 
-if [ -z "$(podman images -q "$IMAGE_NAME" 2>/dev/null)" ]; then
-    echo "[*] Image $IMAGE_NAME not found. Running initial build..."
-    podman build -t "$IMAGE_NAME" -f "$CONTAINERFILE" "$SCRIPT_DIR" 2>&1 | tee build.log
-fi
-
+# --- Handle --clean before image check — cleaning doesn't need the image ---
 [ -z "$TARGET_DIR" ] && TARGET_DIR=$(pwd)
 TARGET_DIR=$(readlink -f "$TARGET_DIR")
 
-# --- Handle --clean: wipe workspace + nuke the PG volume ---
 if [ $CLEAN -eq 1 ]; then
     echo "[*] --clean requested. Wiping state for a fresh challenge."
 
@@ -60,6 +55,11 @@ if [ $CLEAN -eq 1 ]; then
     echo ""
     echo "[+] Clean complete. Run without --clean to start a fresh session."
     exit 0
+fi
+
+if [ -z "$(podman images -q "$IMAGE_NAME" 2>/dev/null)" ]; then
+    echo "[*] Image $IMAGE_NAME not found. Running initial build..."
+    podman build -t "$IMAGE_NAME" -f "$CONTAINERFILE" "$SCRIPT_DIR" 2>&1 | tee build.log
 fi
 
 # --- Generate AGENTS.md dynamically ---
@@ -184,7 +184,7 @@ rdp-disconnect
     ```bash
     DISPLAY=:99 wmctrl -a "FreeRDP"   # or the window title
     ```
-6.  **Timeouts:** RDP sessions on HTB/THM boxes are unstable. If xfreerdp dies,
+6.  **Timeouts:** RDP sessions on HTB/THM boxes are unstable. If xfreerdp3 dies,
     just re-run `rdp-connect`. The Xvfb display persists.
 
 ### Opening Applications via RDP
