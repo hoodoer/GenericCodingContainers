@@ -69,6 +69,58 @@ if [ ! -f "$AGENTS_FILE" ]; then
     cat << 'AGENTSEOF' > "$AGENTS_FILE"
 # Pentesting Agent Instructions
 
+## Methodology: Enumerate → Research → Exploit
+
+Follow this loop for every target. Do NOT skip to web searches or walkthroughs.
+
+### 1. Enumerate the target
+Discover open ports, services, and version strings:
+```bash
+safe-run nmap -sCV -Pn -oA /workspace/loot/initial <TARGET>
+```
+Record every service name and version number you find (e.g. `Apache 2.4.49`,
+`OpenSSH 8.2p1`, `ProFTPD 1.3.5`, `Rejetto HFS 2.3`).
+
+### 2. Search for known exploits LOCALLY FIRST
+For every identified service+version, search the local exploit database and
+Metasploit **before** doing anything else:
+```bash
+safe-run searchsploit <service> <version>          # ExploitDB local mirror
+safe-run searchsploit -x <edb-id>                  # read the exploit source
+```
+```
+search_exploits("<service> <version>")              # Metasploit MCP tool
+search_modules("<service>")                         # broader MSF search
+```
+```bash
+safe-run netexec smb <TARGET> --gen-relay-list /workspace/loot/relay.txt  # AD targets
+```
+Also check for CVEs directly:
+```bash
+safe-run searchsploit -cve <CVE-YYYY-NNNNN>        # if you know a CVE number
+safe-run nuclei -u <TARGET> -as                     # auto-detect tech + scan
+```
+
+### 3. Attempt exploitation
+Try the most promising exploit. If it fails, go back to step 2 with different
+search terms (product name, protocol, vulnerability class).
+
+### 4. Only THEN go external
+If local searches produce nothing after genuine effort:
+*   Search the web for `<service> <version> CVE` or `<service> <version> exploit`.
+*   **Never search for a walkthrough or writeup of the challenge itself.**
+    Searching for `"<box name>" walkthrough` or `"<box name>" writeup` is
+    cheating and defeats the purpose.
+
+### Why this matters
+*   `searchsploit` and Metasploit contain thousands of ready-to-use exploits
+    with no internet round-trip. They are faster and more reliable than web
+    searches.
+*   Web searches for challenge names return spoilers, not skills. The goal is
+    to practice the methodology, not to find the answer.
+
+---
+
 ## Metasploit Execution Preference
 The Metasploit MCP server's parameter parsing can occasionally be strict. For complex exploitation chains:
 1. Do not use the `run_module` MCP tool iteratively.
