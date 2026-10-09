@@ -9,7 +9,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl wget gnupg sudo \
       git vim nano less procps iproute2 iputils-ping net-tools \
-      jq yq ripgrep fd-find bat tree unzip zip file binutils moreutils \
+      jq yq ripgrep fd-find bat tree unzip zip file binutils moreutils xxd \
       python3 python3-pip python3-venv python3-dev build-essential \
       golang-go nodejs npm \
       socat netcat-openbsd ncat dnsutils whois tcpdump arp-scan macchanger \
@@ -97,7 +97,7 @@ RUN set -u; \
 
 # --- OpenCode CLI. Kali ships /usr/bin/sg from shadow, which collides with the
 #     npm bin shim -- same conflict the Ubuntu build worked around.
-RUN rm -f /usr/bin/sg && npm install -g --force --allow-scripts=opencode-ai opencode-ai
+RUN rm -f /usr/bin/sg && npm install -g --force --allow-scripts=opencode-ai opencode-ai agent-rdp
 
 # --- Agent Setup
 # Passes heredocs to Bash to bypass Podman 4.x parser limitations, then cleans up.

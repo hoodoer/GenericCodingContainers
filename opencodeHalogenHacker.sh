@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
 set -eo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="\$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE_NAME="opencode-halogen-hacker"
-CONTAINERFILE="$SCRIPT_DIR/Containerfile.openCode-halogen-hacker"
+CONTAINERFILE="\$SCRIPT_DIR/Containerfile.openCode-halogen-hacker"
 CONTAINER_NAME="opencode-halogen-hacker"
 PG_VOLUME="halogen-pentest-pgdata"
 
 REBUILD=0
 CLEAN=0
 TARGET_DIR=""
-HALOGEN_URL="${HALOGEN_URL:-http://host.containers.internal:8731/v1}"
+HALOGEN_URL="\${HALOGEN_URL:-http://host.containers.internal:8731/v1}"
 
-while [[ $# -gt 0 ]]; do
-    case $1 in
+while [[ \$# -gt 0 ]]; do
+    case \$1 in
         -r|--rebuild)   REBUILD=1; shift ;;
         -c|--clean)     CLEAN=1; shift ;;
-        --halogen)      HALOGEN_URL="$2"; shift 2 ;;
-        --halogen=*)    HALOGEN_URL="${1#*=}"; shift ;;
-        *)              TARGET_DIR="$1"; shift ;;
+        --halogen)      HALOGEN_URL="\$2"; shift 2 ;;
+        --halogen=*)    HALOGEN_URL="\${1#*=}"; shift ;;
+        *)              TARGET_DIR="\$1"; shift ;;
     esac
 done
 
@@ -26,11 +26,11 @@ if ! command -v podman >/dev/null 2>&1; then
     echo "[-] podman not found on PATH."; exit 1
 fi
 
-if [ $REBUILD -eq 1 ]; then
+if [ \$REBUILD -eq 1 ]; then
     echo "[*] Explicit rebuild requested."
-    echo "[*] Building $IMAGE_NAME from $CONTAINERFILE..."
-    podman build --no-cache -t "$IMAGE_NAME" -f "$CONTAINERFILE" "$SCRIPT_DIR" 2>&1 | tee build.log
-    echo "[+] Image $IMAGE_NAME built. Exiting without launching."
+    echo "[*] Building $IMAGE_NAME from$CONTAINERFILE..."
+    podman build --no-cache -t "\$IMAGE_NAME" -f "$CONTAINERFILE" "$SCRIPT_DIR" 2>&1 | tee build.log
+    echo "[+] Image \$IMAGE_NAME built. Exiting without launching."
     exit 0
 fi
 
@@ -38,35 +38,35 @@ fi
 [ -z "$TARGET_DIR" ] && TARGET_DIR=$(pwd)
 TARGET_DIR=$(readlink -f "$TARGET_DIR")
 
-if [ $CLEAN -eq 1 ]; then
+if [ \$CLEAN -eq 1 ]; then
     echo "[*] --clean requested. Wiping state for a fresh challenge."
 
     # Wipe workspace contents on the host side
-    if [ -d "$TARGET_DIR" ]; then
-        echo "[*] Cleaning $TARGET_DIR..."
-        find "$TARGET_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
+    if [ -d "\$TARGET_DIR" ]; then
+        echo "[*] Cleaning \$TARGET_DIR..."
+        find "\$TARGET_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
         echo "[+] Workspace cleaned."
     fi
 
     # Destroy and recreate the PG volume so the MSF database starts fresh
-    echo "[*] Destroying PostgreSQL volume ($PG_VOLUME)..."
-    podman volume rm -f "$PG_VOLUME" >/dev/null 2>&1 || true
+    echo "[*] Destroying PostgreSQL volume (\$PG_VOLUME)..."
+    podman volume rm -f "\$PG_VOLUME" >/dev/null 2>&1 || true
     echo "[+] Volume removed. A fresh volume will be created on launch."
     echo ""
     echo "[+] Clean complete. Run without --clean to start a fresh session."
     exit 0
 fi
 
-if [ -z "$(podman images -q "$IMAGE_NAME" 2>/dev/null)" ]; then
-    echo "[*] Image $IMAGE_NAME not found. Running initial build..."
-    podman build -t "$IMAGE_NAME" -f "$CONTAINERFILE" "$SCRIPT_DIR" 2>&1 | tee build.log
+if [ -z "\$(podman images -q "\$IMAGE_NAME" 2>/dev/null)" ]; then
+    echo "[*] Image \$IMAGE_NAME not found. Running initial build..."
+    podman build -t "\$IMAGE_NAME" -f "$CONTAINERFILE" "$SCRIPT_DIR" 2>&1 | tee build.log
 fi
 
 # --- Generate AGENTS.md dynamically ---
-AGENTS_FILE="$TARGET_DIR/AGENTS.md"
-if [ ! -f "$AGENTS_FILE" ]; then
-    echo "[*] Generating default AGENTS.md in $TARGET_DIR..."
-    cat << 'AGENTSEOF' > "$AGENTS_FILE"
+AGENTS_FILE="\$TARGET_DIR/AGENTS.md"
+if [ ! -f "\$AGENTS_FILE" ]; then
+    echo "[*] Generating default AGENTS.md in \$TARGET_DIR..."
+    cat << 'AGENTSEOF' > "\$AGENTS_FILE"
 # Pentesting Agent Instructions
 
 ## Methodology: Enumerate → Research → Exploit
@@ -194,72 +194,84 @@ safe-run smbclient '//<TARGET>/C$' -U '<DOMAIN>/<USER>%<PASS>'
 a browser-based step, or a GUI-only tool. For everything else, use the text-based
 methods above.
 
-### Quick-Start Commands
-These wrapper scripts handle Xvfb, xfreerdp, and xdotool for you:
+### Quick-Start Commands (`agent-rdp`)
+`agent-rdp` runs as a headless protocol client. It manages session state, UI Automation
+accessibility trees, and frame capture without requiring Xvfb or xdotool.
 
 ```bash
-# Connect (starts Xvfb automatically)
-rdp-connect <TARGET_IP> <USER> '<PASS>'           # default 1024x768
-rdp-connect <TARGET_IP> <USER> '<PASS>' 1280x720  # custom resolution
+# Connect with UI Automation inspection channel enabled
+safe-run agent-rdp connect --host <TARGET_IP> --username <USER> --password '<PASS>' --enable-win-automation
 
-# Take a screenshot
-rdp-screenshot            # saves PNG to /workspace/loot/screenshots/
-rdp-screenshot --ocr      # saves PNG + runs tesseract OCR, prints text
+# Inspect state via accessibility tree (preferred over vision)
+safe-run agent-rdp automate snapshot -i
 
-# Send keystrokes
-rdp-type "whoami"                 # types text literally
-rdp-type --cmd "whoami"           # types text + presses Enter
-rdp-type --key Return             # sends a single key
-rdp-type --key super              # opens Start menu
-rdp-type --key ctrl+l             # focus browser address bar
+# Inspect state via screenshot (saves PNG directly to loot)
+safe-run agent-rdp screenshot --output /workspace/loot/screenshots/desktop.png
 
-# Disconnect and tear down
-rdp-disconnect
+# Send clicks to an accessibility element index
+safe-run agent-rdp mouse click @e1
+
+# Send clipboard commands (preferred over typing to prevent dropped scan codes)
+safe-run agent-rdp clipboard set "whoami /priv"
+safe-run agent-rdp keyboard press "ctrl+v"
+safe-run agent-rdp keyboard press enter
+
+# Send literal text or keys
+safe-run agent-rdp keyboard type "cmd.exe"
+safe-run agent-rdp keyboard press enter
+safe-run agent-rdp keyboard press super          # Opens Start menu
+
+# Disconnect session
+safe-run agent-rdp disconnect
 ```
 
-### Performance Rules
-1.  **Resolution:** Use 1024x768 or 1280x720. Larger wastes bandwidth and OCR time.
-2.  **Color depth:** The wrapper uses `/bpp:16` and disables wallpaper/themes/animations. Do not override these.
-3.  **Batch your actions:** Plan a full sequence of keystrokes before sending. Do NOT
-    screenshot-type-screenshot in a tight loop. Instead:
-    *   Type the full command sequence.
-    *   Wait 2-3 seconds for execution.
-    *   Take ONE screenshot to verify the result.
-4.  **OCR budget:** Each `rdp-screenshot --ocr` call costs ~2-3 seconds. Minimize calls.
-    If you need to read a small area, crop the screenshot with `convert` before OCR:
+### Performance & Interaction Rules
+1.  **Inspect Trees Before Pixels:** Always attempt `agent-rdp automate snapshot -i` first.
+    Targeting elements by semantic index (`@e1`, `@e2`) bypasses vision token limits and
+    avoids pixel coordinate drift.
+2.  **Clipboard Over Keystroke Typing:** When executing commands in cmd, PowerShell, or run
+    dialogs, write the payload to the clipboard via `agent-rdp clipboard set` and paste with
+    `agent-rdp keyboard press "ctrl+v"`. This prevents truncated characters or dropped shift
+    keys.
+3.  **Batch Your Actions:** Plan sequences before executing. Do NOT loop snapshot-click-snapshot
+    rapidly. Dispatch the action sequence, wait 2–3 seconds for remote UI rendering, and
+    capture a single snapshot or screenshot to confirm execution.
+4.  **Fallback to Coordinate Clicks:** If custom canvas controls or legacy interfaces do not
+    render into the accessibility tree, inspect the captured screenshot and target raw coordinates:
     ```bash
-    convert /workspace/loot/screenshots/rdp-LATEST.png -crop 600x200+100+300 /tmp/crop.png
-    tesseract /tmp/crop.png /tmp/crop --psm 6
-    cat /tmp/crop.txt
+    safe-run agent-rdp mouse click 512 384
+    safe-run agent-rdp mouse double-click 100 200
     ```
-5.  **Window focus:** If keystrokes aren't landing, refocus:
+5.  **Timeouts & Reconnects:** If a session drops or freezes, disconnect and reconnect cleanly:
     ```bash
-    DISPLAY=:99 wmctrl -a "FreeRDP"   # or the window title
+    safe-run agent-rdp disconnect
+    safe-run agent-rdp connect --host <TARGET_IP> --username <USER> --password '<PASS>' --enable-win-automation
     ```
-6.  **Timeouts:** RDP sessions on HTB/THM boxes are unstable. If xfreerdp3 dies,
-    just re-run `rdp-connect`. The Xvfb display persists.
 
 ### Opening Applications via RDP
 When you need to launch a GUI application:
 ```bash
 # Open Start Menu → type app name → Enter
-rdp-type --key super
+safe-run agent-rdp keyboard press super
 sleep 1
-rdp-type --cmd "cmd"          # or "powershell", "notepad", app name
+safe-run agent-rdp keyboard type "cmd"          # or "powershell", "notepad", app name
+safe-run agent-rdp keyboard press enter
 sleep 2
-rdp-screenshot --ocr          # verify it opened
+safe-run agent-rdp automate snapshot -i         # verify window opened
 ```
 
 For browser-based tasks:
 ```bash
-rdp-type --key super
+safe-run agent-rdp keyboard press super
 sleep 1
-rdp-type --cmd "msedge"       # or "firefox", "chrome"
+safe-run agent-rdp keyboard type "msedge"       # or "firefox", "chrome"
+safe-run agent-rdp keyboard press enter
 sleep 3
-rdp-type --key ctrl+l         # focus address bar
-rdp-type --cmd "http://target-url:8080/path"
+safe-run agent-rdp keyboard press "ctrl+l"      # focus address bar
+safe-run agent-rdp keyboard type "http://target-url:8080/path"
+safe-run agent-rdp keyboard press enter
 sleep 3
-rdp-screenshot --ocr
+safe-run agent-rdp screenshot --output /workspace/loot/screenshots/browser.png
 ```
 
 ### When to Abandon RDP
