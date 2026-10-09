@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
 set -eo pipefail
 
-SCRIPT_DIR="\$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE_NAME="opencode-halogen-hacker"
-CONTAINERFILE="\$SCRIPT_DIR/Containerfile.openCode-halogen-hacker"
+CONTAINERFILE="$SCRIPT_DIR/Containerfile.openCode-halogen-hacker"
 CONTAINER_NAME="opencode-halogen-hacker"
 PG_VOLUME="halogen-pentest-pgdata"
 
 REBUILD=0
 CLEAN=0
 TARGET_DIR=""
-HALOGEN_URL="\${HALOGEN_URL:-http://host.containers.internal:8731/v1}"
+HALOGEN_URL="${HALOGEN_URL:-http://host.containers.internal:8731/v1}"
 
-while [[ \$# -gt 0 ]]; do
-    case \$1 in
+while [[ $# -gt 0 ]]; do
+    case $1 in
         -r|--rebuild)   REBUILD=1; shift ;;
         -c|--clean)     CLEAN=1; shift ;;
-        --halogen)      HALOGEN_URL="\$2"; shift 2 ;;
-        --halogen=*)    HALOGEN_URL="\${1#*=}"; shift ;;
-        *)              TARGET_DIR="\$1"; shift ;;
+        --halogen)      HALOGEN_URL="$2"; shift 2 ;;
+        --halogen=*)    HALOGEN_URL="${1#*=}"; shift ;;
+        *)              TARGET_DIR="$1"; shift ;;
     esac
 done
 
@@ -26,11 +26,11 @@ if ! command -v podman >/dev/null 2>&1; then
     echo "[-] podman not found on PATH."; exit 1
 fi
 
-if [ \$REBUILD -eq 1 ]; then
+if [ $REBUILD -eq 1 ]; then
     echo "[*] Explicit rebuild requested."
-    echo "[*] Building $IMAGE_NAME from$CONTAINERFILE..."
-    podman build --no-cache -t "\$IMAGE_NAME" -f "$CONTAINERFILE" "$SCRIPT_DIR" 2>&1 | tee build.log
-    echo "[+] Image \$IMAGE_NAME built. Exiting without launching."
+    echo "[*] Building $IMAGE_NAME from $CONTAINERFILE..."
+    podman build --no-cache -t "$IMAGE_NAME" -f "$CONTAINERFILE" "$SCRIPT_DIR" 2>&1 | tee build.log
+    echo "[+] Image $IMAGE_NAME built. Exiting without launching."
     exit 0
 fi
 
@@ -38,35 +38,35 @@ fi
 [ -z "$TARGET_DIR" ] && TARGET_DIR=$(pwd)
 TARGET_DIR=$(readlink -f "$TARGET_DIR")
 
-if [ \$CLEAN -eq 1 ]; then
+if [ $CLEAN -eq 1 ]; then
     echo "[*] --clean requested. Wiping state for a fresh challenge."
 
     # Wipe workspace contents on the host side
-    if [ -d "\$TARGET_DIR" ]; then
-        echo "[*] Cleaning \$TARGET_DIR..."
-        find "\$TARGET_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
+    if [ -d "$TARGET_DIR" ]; then
+        echo "[*] Cleaning $TARGET_DIR..."
+        find "$TARGET_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
         echo "[+] Workspace cleaned."
     fi
 
     # Destroy and recreate the PG volume so the MSF database starts fresh
-    echo "[*] Destroying PostgreSQL volume (\$PG_VOLUME)..."
-    podman volume rm -f "\$PG_VOLUME" >/dev/null 2>&1 || true
+    echo "[*] Destroying PostgreSQL volume ($PG_VOLUME)..."
+    podman volume rm -f "$PG_VOLUME" >/dev/null 2>&1 || true
     echo "[+] Volume removed. A fresh volume will be created on launch."
     echo ""
     echo "[+] Clean complete. Run without --clean to start a fresh session."
     exit 0
 fi
 
-if [ -z "\$(podman images -q "\$IMAGE_NAME" 2>/dev/null)" ]; then
-    echo "[*] Image \$IMAGE_NAME not found. Running initial build..."
-    podman build -t "\$IMAGE_NAME" -f "$CONTAINERFILE" "$SCRIPT_DIR" 2>&1 | tee build.log
+if [ -z "$(podman images -q "$IMAGE_NAME" 2>/dev/null)" ]; then
+    echo "[*] Image $IMAGE_NAME not found. Running initial build..."
+    podman build -t "$IMAGE_NAME" -f "$CONTAINERFILE" "$SCRIPT_DIR" 2>&1 | tee build.log
 fi
 
 # --- Generate AGENTS.md dynamically ---
-AGENTS_FILE="\$TARGET_DIR/AGENTS.md"
-if [ ! -f "\$AGENTS_FILE" ]; then
-    echo "[*] Generating default AGENTS.md in \$TARGET_DIR..."
-    cat << 'AGENTSEOF' > "\$AGENTS_FILE"
+AGENTS_FILE="$TARGET_DIR/AGENTS.md"
+if [ ! -f "$AGENTS_FILE" ]; then
+    echo "[*] Generating default AGENTS.md in $TARGET_DIR..."
+    cat << 'AGENTSEOF' | sed 's/___FENCE___/```/g' > "$AGENTS_FILE"
 # Pentesting Agent Instructions
 
 ## Methodology: Enumerate → Research → Exploit
@@ -75,31 +75,31 @@ Follow this loop for every target. Do NOT skip to web searches or walkthroughs.
 
 ### 1. Enumerate the target
 Discover open ports, services, and version strings:
-```bash
+___FENCE___bash
 safe-run nmap -sCV -Pn -oA /workspace/loot/initial <TARGET>
-```
+___FENCE___
 Record every service name and version number you find (e.g. `Apache 2.4.49`,
 `OpenSSH 8.2p1`, `ProFTPD 1.3.5`, `Rejetto HFS 2.3`).
 
 ### 2. Search for known exploits LOCALLY FIRST
 For every identified service+version, search the local exploit database and
 Metasploit **before** doing anything else:
-```bash
+___FENCE___bash
 safe-run searchsploit <service> <version>          # ExploitDB local mirror
 safe-run searchsploit -x <edb-id>                  # read the exploit source
-```
-```
+___FENCE___
+___FENCE___
 search_exploits("<service> <version>")              # Metasploit MCP tool
 search_modules("<service>")                         # broader MSF search
-```
-```bash
+___FENCE___
+___FENCE___bash
 safe-run netexec smb <TARGET> --gen-relay-list /workspace/loot/relay.txt  # AD targets
-```
+___FENCE___
 Also check for CVEs directly:
-```bash
+___FENCE___bash
 safe-run searchsploit -cve <CVE-YYYY-NNNNN>        # if you know a CVE number
 safe-run nuclei -u <TARGET> -as                     # auto-detect tech + scan
-```
+___FENCE___
 
 ### 3. Attempt exploitation
 Try the most promising exploit. If it fails, go back to step 2 with different
@@ -148,41 +148,41 @@ faster and more reliable than RDP. **Only fall back to RDP if all text-based met
 or the challenge explicitly requires GUI interaction.**
 
 ### 1. Evil-WinRM (preferred for WinRM / port 5985-5986)
-```bash
+___FENCE___bash
 safe-run evil-winrm -i <TARGET> -u <USER> -p '<PASS>'
-```
+___FENCE___
 *   Full PowerShell session. Upload/download files. Load scripts.
 *   If the port is open, try this first.
 
 ### 2. Impacket psexec / wmiexec / smbexec (SMB-based shells)
-```bash
+___FENCE___bash
 safe-run impacket-psexec '<DOMAIN>/<USER>:<PASS>@<TARGET>'
 safe-run impacket-wmiexec '<DOMAIN>/<USER>:<PASS>@<TARGET>'
 safe-run impacket-smbexec '<DOMAIN>/<USER>:<PASS>@<TARGET>'
-```
+___FENCE___
 *   Semi-interactive SYSTEM shells. Good for quick flag grabs on the Administrator desktop.
 *   `wmiexec` is stealthier; `psexec` gives SYSTEM; `smbexec` works when psexec is blocked.
 
 ### 3. Impacket secretsdump (hash dumping without a shell)
-```bash
+___FENCE___bash
 safe-run impacket-secretsdump '<DOMAIN>/<USER>:<PASS>@<TARGET>'
-```
+___FENCE___
 *   Dumps SAM/LSA/NTDS. Often all you need for a flag hidden in credential stores.
 
 ### 4. NetExec (quick credential validation + enumeration)
-```bash
+___FENCE___bash
 safe-run netexec smb <TARGET> -u <USER> -p '<PASS>'
 safe-run netexec winrm <TARGET> -u <USER> -p '<PASS>'
 safe-run netexec rdp <TARGET> -u <USER> -p '<PASS>'
-```
+___FENCE___
 *   Fast spray: test creds across protocols in seconds.
 *   Add `--shares` / `--users` / `--rid-brute` for quick enumeration.
 *   Tells you instantly if WinRM is available (look for `Pwn3d!`).
 
 ### 5. SMB file access (grab flags from shares directly)
-```bash
+___FENCE___bash
 safe-run smbclient '//<TARGET>/C$' -U '<DOMAIN>/<USER>%<PASS>'
-```
+___FENCE___
 *   If you know the flag path (e.g. `C:\Users\Administrator\Desktop\root.txt`),
     just `get` it. No shell needed.
 
@@ -198,7 +198,7 @@ methods above.
 `agent-rdp` runs as a headless protocol client. It manages session state, UI Automation
 accessibility trees, and frame capture without requiring Xvfb or xdotool.
 
-```bash
+___FENCE___bash
 # Connect with UI Automation inspection channel enabled
 safe-run agent-rdp connect --host <TARGET_IP> --username <USER> --password '<PASS>' --enable-win-automation
 
@@ -223,7 +223,7 @@ safe-run agent-rdp keyboard press super          # Opens Start menu
 
 # Disconnect session
 safe-run agent-rdp disconnect
-```
+___FENCE___
 
 ### Performance & Interaction Rules
 1.  **Inspect Trees Before Pixels:** Always attempt `agent-rdp automate snapshot -i` first.
@@ -238,19 +238,19 @@ safe-run agent-rdp disconnect
     capture a single snapshot or screenshot to confirm execution.
 4.  **Fallback to Coordinate Clicks:** If custom canvas controls or legacy interfaces do not
     render into the accessibility tree, inspect the captured screenshot and target raw coordinates:
-    ```bash
-    safe-run agent-rdp mouse click 512 384
-    safe-run agent-rdp mouse double-click 100 200
-    ```
+___FENCE___bash
+safe-run agent-rdp mouse click 512 384
+safe-run agent-rdp mouse double-click 100 200
+___FENCE___
 5.  **Timeouts & Reconnects:** If a session drops or freezes, disconnect and reconnect cleanly:
-    ```bash
-    safe-run agent-rdp disconnect
-    safe-run agent-rdp connect --host <TARGET_IP> --username <USER> --password '<PASS>' --enable-win-automation
-    ```
+___FENCE___bash
+safe-run agent-rdp disconnect
+safe-run agent-rdp connect --host <TARGET_IP> --username <USER> --password '<PASS>' --enable-win-automation
+___FENCE___
 
 ### Opening Applications via RDP
 When you need to launch a GUI application:
-```bash
+___FENCE___bash
 # Open Start Menu → type app name → Enter
 safe-run agent-rdp keyboard press super
 sleep 1
@@ -258,10 +258,10 @@ safe-run agent-rdp keyboard type "cmd"          # or "powershell", "notepad", ap
 safe-run agent-rdp keyboard press enter
 sleep 2
 safe-run agent-rdp automate snapshot -i         # verify window opened
-```
+___FENCE___
 
 For browser-based tasks:
-```bash
+___FENCE___bash
 safe-run agent-rdp keyboard press super
 sleep 1
 safe-run agent-rdp keyboard type "msedge"       # or "firefox", "chrome"
@@ -272,7 +272,7 @@ safe-run agent-rdp keyboard type "http://target-url:8080/path"
 safe-run agent-rdp keyboard press enter
 sleep 3
 safe-run agent-rdp screenshot --output /workspace/loot/screenshots/browser.png
-```
+___FENCE___
 
 ### When to Abandon RDP
 If you have spent more than **5 minutes** fighting RDP (connection drops, black screens,
