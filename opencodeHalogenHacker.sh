@@ -304,6 +304,7 @@ exec podman run -it --rm \
     --name "$CONTAINER_NAME" \
     --cap-add=NET_RAW \
     --cap-add=NET_ADMIN \
+    -p 445:445 \
     -p 4444-4450:4444-4450 \
     -w /workspace \
     -e HALOGEN_URL="$HALOGEN_URL" \
