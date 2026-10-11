@@ -30,7 +30,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # --- Web hacking tools (not in apt)
 RUN pip3 install --no-cache-dir --break-system-packages \
-      graphqlmap \
+      git+https://github.com/swisskyrepo/GraphQLmap.git \
     && pip3 cache purge
 
 RUN git clone --depth 1 https://github.com/ticarpi/jwt_tool.git /opt/jwt_tool \
@@ -65,8 +65,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # --- OCR-B font (used by MRZ / passport-style puzzles)
 RUN mkdir -p /usr/share/fonts/truetype/ocrb && \
-    curl -fsSL "https://raw.githubusercontent.com/nicholasgasior/gofont-ocr-b/master/OCRB-Regular.otf" \
-      -o /usr/share/fonts/truetype/ocrb/OCRB-Regular.otf && \
+    curl -fsSL "https://raw.githubusercontent.com/jaycee723/ocr-b/master/dist/OCR-B.otf" \
+      -o /usr/share/fonts/truetype/ocrb/OCR-B.otf && \
     fc-cache -f /usr/share/fonts/truetype/ocrb || \
     echo "WARN: OCR-B font download failed; MRZ tasks may need manual font install"
 
@@ -80,12 +80,19 @@ RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
     && rm -rf /var/lib/apt/lists/*
 
 # --- Python tooling
-RUN pip3 install --no-cache-dir --break-system-packages \
+RUN apt-get remove -y python3-minikerberos 2>/dev/null || true \
+    && pip3 install --no-cache-dir --break-system-packages \
       "mcp[cli]<2" certipy-ad bloodhound ldap3 requests \
       aardwolf pyrdp \
-      pypykatz pywhisker \
-      git+https://github.com/dirkjanm/PKINITtools.git \
+      pypykatz \
+    && pip3 install --no-cache-dir --break-system-packages --no-deps pywhisker \
     && pip3 cache purge
+
+RUN git clone --depth 1 https://github.com/dirkjanm/PKINITtools.git /opt/PKINITtools \
+    && ln -sf /opt/PKINITtools/gettgtpkinit.py /usr/local/bin/gettgtpkinit.py \
+    && ln -sf /opt/PKINITtools/gets4uticket.py /usr/local/bin/gets4uticket.py \
+    && ln -sf /opt/PKINITtools/getnthash.py /usr/local/bin/getnthash.py \
+    || echo "WARN: PKINITtools install failed"
 
 RUN curl -fsSL https://raw.githubusercontent.com/dirkjanm/krbrelayx/master/dnstool.py -o /usr/local/bin/dnstool.py \
     && chmod +x /usr/local/bin/dnstool.py
@@ -120,7 +127,7 @@ RUN set -u; \
     fetch_latest "nicocha30/ligolo-ng" "proxy.*linux_amd64.tar.gz" "proxy"; \
     [ -f /usr/local/bin/proxy ] && mv /usr/local/bin/proxy /usr/local/bin/ligolo-proxy || true; \
     fetch_latest "jpillora/chisel" "linux_amd64.gz" "chisel"; \
-    fetch_latest "vi/websocat" "websocat_max.x86_64-unknown-linux-musl" "websocat"; \
+    fetch_latest "vi/websocat" "websocat.x86_64-unknown-linux-musl" "websocat"; \
     fetch_latest "ropnop/kerbrute" "linux_amd64" "kerbrute"; \
     fetch_latest "DominicBreuker/pspy" "pspy64" "pspy64"; \
     true
@@ -129,8 +136,11 @@ RUN set -u; \
 RUN mkdir -p /opt/windows-tools && \
     curl -fsSL "https://github.com/r3motecontrol/Ghostpack-CompiledBinaries/raw/master/Rubeus.exe" \
       -o /opt/windows-tools/Rubeus.exe || echo "WARN: Rubeus download failed" && \
-    curl -fsSL "https://github.com/r3motecontrol/Ghostpack-CompiledBinaries/raw/master/SharpHound.exe" \
-      -o /opt/windows-tools/SharpHound.exe || echo "WARN: SharpHound download failed" && \
+    (curl -fsSL -o /tmp/sharphound.zip \
+      "$(curl -fsSL https://api.github.com/repos/SpecterOps/SharpHound/releases/latest \
+        | jq -r '.assets[].browser_download_url | select(test("windows"))' | head -n1)" \
+      && unzip -o -j /tmp/sharphound.zip SharpHound.exe -d /opt/windows-tools/ \
+      && rm -f /tmp/sharphound.zip) || echo "WARN: SharpHound download failed" && \
     curl -fsSL "https://github.com/r3motecontrol/Ghostpack-CompiledBinaries/raw/master/Certify.exe" \
       -o /opt/windows-tools/Certify.exe || echo "WARN: Certify download failed" && \
     echo "[+] Windows tools staged in /opt/windows-tools/"
