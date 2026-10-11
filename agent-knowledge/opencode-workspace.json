@@ -1,0 +1,38 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "compaction": {
+    "auto": true,
+    "keep": { "tokens": 30000 },
+    "buffer": 20000
+  },
+  "references": {
+    "ad": {
+      "path": "references/active-directory",
+      "description": "Active Directory attack reference: ACL-right to attack-primitive matrix, Kerberos ticket errors and tgtdeleg, dMSA/badSuccessor abuse, RBCD, shadow credentials, delegation, tombstone reanimation, BloodHound queries. Use when attacking AD/Windows domains or when Kerberos errors appear."
+    },
+    "adcs": {
+      "path": "references/adcs",
+      "description": "Active Directory Certificate Services: ESC1-16 with certipy commands, certificate-based authentication. Use when ADCS/PKI is detected or certipy finds vulnerable templates."
+    },
+    "windows": {
+      "path": "references/windows",
+      "description": "Windows lateral movement with credentials: execution method priority, failure triage, privilege escalation, flag and secret locations. Use when you have Windows credentials or a low-priv Windows shell."
+    },
+    "linux": {
+      "path": "references/linux",
+      "description": "Linux privilege escalation: SUID/SGID, sudo, capabilities, cron, writable paths, kernel exploits, automated enumeration. Use when you have a Linux shell and need to escalate."
+    },
+    "forensics": {
+      "path": "references/forensics",
+      "description": "Offline credential extraction from memory/disk images: volatility3 hive dump plus secretsdump LOCAL, VM backup shares, LSASS credential plugins. Use when you find .vmem/.vmsn/.vhd/.vhdx files or VM backups."
+    },
+    "env": {
+      "path": "references/environment",
+      "description": "Lab environment gotchas and tool syntax: clock skew, /etc/hosts hygiene, NAT port limits, impacket/bloodyAD/nxc/certipy flag quirks, VM reset behavior. Use when tools fail unexpectedly or after a target reset."
+    },
+    "web": {
+      "path": "references/web",
+      "description": "Web application and API attacks: directory/vhost/parameter fuzzing, SQLi, NoSQLi, SSTI, SSRF, XXE, JWT, LFI/RFI, file upload bypass, GraphQL, brute force, WebSocket testing, nuclei scanning, wordlist paths. Use when attacking web apps or APIs."
+    }
+  }
+}

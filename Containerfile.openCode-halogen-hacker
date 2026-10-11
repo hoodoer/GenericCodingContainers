@@ -25,7 +25,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       whatweb wafw00f testssl.sh \
       hydra john hashcat \
       exploitdb \
+      httpx-toolkit arjun mitmproxy \
     && rm -rf /var/lib/apt/lists/*
+
+# --- Web hacking tools (not in apt)
+RUN pip3 install --no-cache-dir --break-system-packages \
+      graphqlmap \
+    && pip3 cache purge
+
+RUN git clone --depth 1 https://github.com/ticarpi/jwt_tool.git /opt/jwt_tool \
+    && cd /opt/jwt_tool && pip3 install --no-cache-dir --break-system-packages -r requirements.txt \
+    && chmod +x jwt_tool.py && ln -sf /opt/jwt_tool/jwt_tool.py /usr/local/bin/jwt_tool \
+    || echo "WARN: jwt_tool install failed"
 
 # --- Exploitation + Active Directory
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -59,18 +70,34 @@ RUN mkdir -p /usr/share/fonts/truetype/ocrb && \
     fc-cache -f /usr/share/fonts/truetype/ocrb || \
     echo "WARN: OCR-B font download failed; MRZ tasks may need manual font install"
 
+# --- PowerShell + .NET (compile/run C# tools like Rubeus, parse AD objects)
+RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
+      | gpg --dearmor -o /usr/share/keyrings/microsoft.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft.gpg] https://packages.microsoft.com/debian/12/prod bookworm main" \
+      > /etc/apt/sources.list.d/microsoft.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
+      powershell dotnet-sdk-8.0 \
+    && rm -rf /var/lib/apt/lists/*
+
 # --- Python tooling
 RUN pip3 install --no-cache-dir --break-system-packages \
       "mcp[cli]<2" certipy-ad bloodhound ldap3 requests \
-      aardwolf \
-      pyrdp \
+      aardwolf pyrdp \
+      pypykatz pywhisker \
+      git+https://github.com/dirkjanm/PKINITtools.git \
     && pip3 cache purge
 
 RUN curl -fsSL https://raw.githubusercontent.com/dirkjanm/krbrelayx/master/dnstool.py -o /usr/local/bin/dnstool.py \
     && chmod +x /usr/local/bin/dnstool.py
 
-# --- Pivoting tooling. GitHub releases, not apt. Failures warn rather than
-#     abort the build so a release-API hiccup doesn't kill the image.
+# --- PetitPotam (NTLM coercion for ADCS ESC8 and relay attacks)
+RUN curl -fsSL https://raw.githubusercontent.com/topotam/PetitPotam/main/PetitPotam.py \
+      -o /usr/local/bin/petitpotam.py && chmod +x /usr/local/bin/petitpotam.py || \
+    echo "WARN: PetitPotam download failed"
+
+# --- Pivoting + pentest binaries from GitHub releases.
+#     Failures warn rather than abort the build so a release-API hiccup
+#     doesn't kill the image.
 RUN set -u; \
     fetch_latest() { \
       repo="$1"; pat="$2"; bin="$3"; \
@@ -93,11 +120,30 @@ RUN set -u; \
     fetch_latest "nicocha30/ligolo-ng" "proxy.*linux_amd64.tar.gz" "proxy"; \
     [ -f /usr/local/bin/proxy ] && mv /usr/local/bin/proxy /usr/local/bin/ligolo-proxy || true; \
     fetch_latest "jpillora/chisel" "linux_amd64.gz" "chisel"; \
+    fetch_latest "vi/websocat" "websocat_max.x86_64-unknown-linux-musl" "websocat"; \
+    fetch_latest "ropnop/kerbrute" "linux_amd64" "kerbrute"; \
+    fetch_latest "DominicBreuker/pspy" "pspy64" "pspy64"; \
     true
+
+# --- Pre-compiled Windows tools (for upload to targets, not local execution)
+RUN mkdir -p /opt/windows-tools && \
+    curl -fsSL "https://github.com/r3motecontrol/Ghostpack-CompiledBinaries/raw/master/Rubeus.exe" \
+      -o /opt/windows-tools/Rubeus.exe || echo "WARN: Rubeus download failed" && \
+    curl -fsSL "https://github.com/r3motecontrol/Ghostpack-CompiledBinaries/raw/master/SharpHound.exe" \
+      -o /opt/windows-tools/SharpHound.exe || echo "WARN: SharpHound download failed" && \
+    curl -fsSL "https://github.com/r3motecontrol/Ghostpack-CompiledBinaries/raw/master/Certify.exe" \
+      -o /opt/windows-tools/Certify.exe || echo "WARN: Certify download failed" && \
+    echo "[+] Windows tools staged in /opt/windows-tools/"
+
+# --- npm global tools
+RUN npm install -g wscat || echo "WARN: wscat install failed"
 
 # --- OpenCode CLI. Kali ships /usr/bin/sg from shadow, which collides with the
 #     npm bin shim -- same conflict the Ubuntu build worked around.
 RUN rm -f /usr/bin/sg && npm install -g --force --allow-scripts=opencode-ai opencode-ai agent-rdp
+
+# --- Agent knowledge (skills, references, AGENTS.md, workspace config)
+COPY agent-knowledge/ /opt/pentest-agent/
 
 # --- Agent Setup
 # Passes heredocs to Bash to bypass Podman 4.x parser limitations, then cleans up.

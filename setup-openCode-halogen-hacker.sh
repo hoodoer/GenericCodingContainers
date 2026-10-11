@@ -463,14 +463,6 @@ mkdir -p "$HOME/.config/opencode"
 
 echo "$RESPONSE" | jq --arg sel "$SELECTED_MODEL" --arg base "$HALOGEN_URL" '{
   "$schema": "https://opencode.ai/config.json",
-  "instructions": [
-    "/workspace/AGENTS.md"
-  ],
-  "compaction": {
-    "auto": true,
-    "keep": { "tokens": 24000 },
-    "buffer": 20000
-  },
   "provider": {
     "halogen": {
       "npm": "@ai-sdk/openai-compatible",
@@ -520,6 +512,16 @@ echo "$RESPONSE" | jq --arg sel "$SELECTED_MODEL" --arg base "$HALOGEN_URL" '{
 }' > "$HOME/.config/opencode/opencode.json"
 
 echo "[+] Configured OpenCode with active model: $SELECTED_MODEL"
+
+# Bootstrap agent knowledge from image into workspace
+echo "[*] Bootstrapping agent knowledge..."
+cp -f /opt/pentest-agent/AGENTS.md /workspace/AGENTS.md
+cp -f /opt/pentest-agent/opencode-workspace.json /workspace/opencode.json
+cp -rf /opt/pentest-agent/references /workspace/references
+mkdir -p /workspace/.opencode/skills
+cp -rf /opt/pentest-agent/skills/* /workspace/.opencode/skills/
+mkdir -p /workspace/loot
+echo "[+] Agent knowledge deployed (AGENTS.md, skills, references, opencode.json)"
 
 # Preserve sessions inside workspace
 rm -rf "$HOME/.local/share/opencode"
