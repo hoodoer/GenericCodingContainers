@@ -7,8 +7,9 @@ description: Track every credential, hash, ticket, and flag found - validate usa
 
 ## Store everything, immediately
 All loot goes to `/workspace/loot/` with descriptive names:
-`<user>.ntlm`, `<user>.ccache`, `<service>.hash`, `flags.md`. Also mirror the
-running inventory in `/workspace/loot/STATE.md`.
+`<user>.ntlm`, `<user>.ccache`, `<service>.hash`, `flags.md`. Also record each
+one on the state board:
+`note cred '<user> : <secret> -- valid on <where> (from <how>)'`.
 
 ## Validate usability -- don't assume
 - **Password**: test against at least SMB + LDAP + WinRM before moving on;

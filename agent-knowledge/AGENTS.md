@@ -12,7 +12,7 @@
    or ticket, IMMEDIATELY test it across all protocols and enumerate what it
    can access. Different accounts see different shares, services, and ACLs.
    Don't fixate on your first identity -- each new one is a new attack surface.
-   Add it to STATE.md and test it against every known target.
+   Record it with `note cred` and test it against every known target.
 3. **Enumerate capabilities, not just existence.** For every owned principal,
    ask "what does this let me DO?" and map it to an attack primitive.
    "I can write an attribute" is not a finding; "GenericWrite on a user ->
@@ -21,17 +21,55 @@
    integrity error, access denied) is a *diagnosis* with a known fix, not a
    reason to re-run the same command. Search the exact error string.
 5. **Timebox every dead-end.** If a single sub-problem (a shell, a tool, a
-   payload) eats >15 min or >10 tool calls without progress, STOP. Write down
-   the blocker, then either research the symptom or reset the environment.
+   payload) eats >15 min or >10 tool calls without progress, STOP. Record the
+   blocker with `note stuck '<what, what you tried, why each failed>'`, then
+   either research the symptom or reset the environment.
 6. **Never re-run a failing command unchanged.** Change the method, the tool,
    or the inputs. If you're looping, you're not learning.
 7. **A reboot is a legitimate tool.** Lab VMs revert to a snapshot on reboot.
    When an interactive channel is deadlocked and you cannot restart its
    service, rebooting is faster than fighting it.
-8. **Keep a live state scratchpad.** Maintain `/workspace/loot/STATE.md` with:
-   owned principals + what each can DO, credentials/hashes/tickets (and whether
-   each is *usable*), open shares, current hypothesis, last 3 things tried.
-   Re-read it before each new attack.
+8. **Keep the state board current.** See *Working state* below.
+
+## Working state -- `notes/STATE.md`
+- Read `notes/STATE.md` (`note show`) at the start, FIRST after any
+  auto-compaction, and before switching to a new attack vector.
+- The moment you learn a credential, service, access path, or that a vector
+  failed, record it with the `note` CLI -- not "later". Single-quote the text:
+      note cred    'svc_acct : Summer2026! -- valid on DC01 (kerberoast)'
+      note service '10.10.11.5:445 smb Samba 4.15 -- signing off'
+      note access  'www-data on web01 -- regain: curl http://10.10.11.5/s.php?c=id'
+      note failed  'anonymous SMB on 10.10.11.5 -- NT_STATUS_ACCESS_DENIED'
+      note next    'try ESC1 with the Web template'
+      note rm next 'ESC1'            # drop a bullet once done or wrong
+  Text containing a `'`: pass it on stdin instead (`note cred <<'EOF'` ...
+  `EOF`). `note` echoes what it stored -- check secrets came through intact.
+- Sections: scope access cred service finding failed next stuck.
+- After 3 failed attempts on the SAME vector, before switching approaches, run
+  `note stuck '<what, what you tried, why each failed>'` -- it also logs to
+  notes/STUCK.md for human review.
+- After `db_nmap` or any MSF scanner/login module, run `note-from-msf`: it
+  copies open services and creds from the MSF database onto the board.
+- STATE.md is the short board. Depth (per-host/app detail, key output) goes in
+  the wiki: `wiki add hosts/<ip> '<detail>'`. Before re-enumerating anything,
+  run `wiki search <ip-or-name>` -- you may already have it (wiki skill).
+
+## Lessons -- `lessonsLearned.md` (candidates for the knowledge base)
+Separate from working notes. Write a lesson with the `lesson` CLI when, and
+ONLY when, it will hold on the NEXT box with the same fingerprint:
+- a reference said X would work and it didn't (record why),
+- something worked that no reference covered,
+- a stuck period got resolved (what unblocked it),
+- a tool/wrapper misbehaved (that's an `env` lesson).
+    lesson privesc technique 'GTFOBins less trick needs no tty here' --fp 'Ubuntu 22.04, sudo less' --dest '@linux'
+NOT a lesson: anything true only on THIS box -- that goes in the wiki or notes.
+At the end of a box, run `/retro` to capture one closing lesson.
+
+## Assessment write-up -- `ASSESSMENT.md` (for the human report)
+When you CONFIRM something reportable (foothold, valid cred, exploitable vuln,
+flag), append an entry -- what it is, impact, exact repro, evidence path:
+    assess 'SQLi in /login (auth bypass)' 'POST user=... bypasses auth. Repro: <cmd>. Evidence: loot/logs/<file>.log'
+Terse operational state stays in STATE.md; don't mix the two.
 
 ---
 
@@ -78,7 +116,7 @@ run this checklist. **Do it for EVERY new identity, not just the first.**
 - **AD ACLs**: enumerate what this identity can *do* to other objects. Load `@ad`.
 - **Files**: a memory/disk image = offline SAM/LSASS. Load `@forensics`.
 
-Write each mapped capability to `/workspace/loot/STATE.md`.
+Record each mapped capability: `note finding '<principal> -> <right> -> <attack>'`.
 
 ### Phase 4: Exploit the most promising lead
 If it fails, go back to Phase 2 with different search terms (product name,
@@ -102,6 +140,7 @@ Search the web for `<service> <version> CVE` or the exact error string.
 | `creds-and-loot` | Whenever a credential, hash, ticket, or flag is obtained |
 | `pivoting` | When a foothold sees networks the attacker cannot reach |
 | `web-recon` | When a web application or API is discovered on a target |
+| `wiki` | Recording per-host/app detail; searching what you already know |
 
 ### References (load with @name when the topic comes up)
 | Reference | Trigger |
@@ -115,6 +154,13 @@ Search the web for `<service> <version> CVE` or the exact error string.
 | `@env` | Lab environment gotchas: clock skew, /etc/hosts, NAT, tool syntax quirks |
 
 ---
+
+## Noisy enumeration -> the `enum` subagent
+linpeas, winpeas, BloodHound collection/analysis, and large ffuf / feroxbuster /
+nuclei runs ALWAYS go through the `enum` subagent -- their raw output will bury
+the context. Hand the command to `enum` and read back its summary; open the
+`loot/logs/` file only if the summary flags something worth a closer look.
+Everything else you run directly as usual.
 
 ## Metasploit Execution
 The MCP server's parameter parsing can be strict. For complex chains:
@@ -227,7 +273,5 @@ Load `@env` for NAT/routing gotchas when setting up tunnels.
 - **PKINITtools**: `gettgtpkinit.py`, `gets4uticket.py` for cert-based auth.
 - **petitpotam.py**: NTLM coercion for ADCS relay attacks.
 
-## Output & Cleanup
+## Output
 - Save all loot, hashes, and flags to `/workspace/loot/`.
-- Run `cleanup -f` inside the container to wipe workspace and reset MSF database.
-- From host, launch with `--clean` to destroy workspace and PG volume.

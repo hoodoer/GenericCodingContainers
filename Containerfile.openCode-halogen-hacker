@@ -152,8 +152,18 @@ RUN npm install -g wscat || echo "WARN: wscat install failed"
 #     npm bin shim -- same conflict the Ubuntu build worked around.
 RUN rm -f /usr/bin/sg && npm install -g --force --allow-scripts=opencode-ai opencode-ai agent-rdp
 
+# --- Record which OpenCode this image floated to; the checkpoint plugin logs it
+#     to notes/RUN.md so a hook regression can be tied to a version.
+RUN (opencode --version 2>/dev/null || echo unknown) > /opt/opencode.version && \
+    echo "[+] OpenCode $(cat /opt/opencode.version)"
+
 # --- Agent knowledge (skills, references, AGENTS.md, workspace config)
 COPY agent-knowledge/ /opt/pentest-agent/
+
+# --- Hook-regression guard (§A): fail the build if a plugin broke, warn if the
+#     OpenCode hook surface drifted. Keeps us on @latest without a silent
+#     mid-engagement break. Runs here because it needs the plugins just COPY'd.
+RUN bash /opt/pentest-agent/ci/hook-smoke.sh
 
 # --- Agent Setup
 # Passes heredocs to Bash to bypass Podman 4.x parser limitations, then cleans up.

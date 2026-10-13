@@ -55,6 +55,6 @@ ignore is often the one that has the access you need.
   map the ACL, don't just `ls` as yourself.
 
 ## Output
-Write each mapped capability into `/workspace/loot/STATE.md` as
-`principal -> right -> attack -> target`, then rank attacks by effort and
-impact.
+Record each mapped capability with
+`note finding '<principal> -> <right> -> <attack> -> <target>'`, then rank
+attacks by effort and impact.
