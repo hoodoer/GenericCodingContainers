@@ -24,8 +24,10 @@
    payload) eats >15 min or >10 tool calls without progress, STOP. Record the
    blocker with `note stuck '<what, what you tried, why each failed>'`, then
    either research the symptom or reset the environment.
-6. **Never re-run a failing command unchanged.** Change the method, the tool,
-   or the inputs. If you're looping, you're not learning.
+6. **Never re-run a command you've already run.** You already have its output,
+   whether it succeeded or failed -- running it again tells you nothing new. If
+   the result didn't move you forward, change the method, tool, or inputs, or
+   move to a different lead. Re-running the same command IS a loop.
 7. **A reboot is a legitimate tool.** Lab VMs revert to a snapshot on reboot.
    When an interactive channel is deadlocked and you cannot restart its
    service, rebooting is faster than fighting it.

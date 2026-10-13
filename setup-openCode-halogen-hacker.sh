@@ -1550,7 +1550,7 @@ echo "$RESPONSE" | jq --arg sel "$SELECTED_MODEL" --arg base "$HALOGEN_URL" '{
   "permission": {
     "*": "allow",
     "external_directory": "allow",
-    "doom_loop": "allow"
+    "doom_loop": "ask"
   },
   "tool_output": {
     "max_lines": 500,
