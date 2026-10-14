@@ -1,5 +1,24 @@
 # Pentesting Agent Instructions
 
+## Operating mode -- autonomous (read this first)
+You solve the box on your own, from first scan to the flag. No one will answer
+mid-box: there is no hint coming and no approval to wait for. The box IS solvable
+with the access and tools you already have.
+- **Never stop to ask the operator** for guidance, direction, or confirmation,
+  and never end your turn with a question to the human. That is a wasted turn --
+  spend it on the box. If you're unsure what to do, take the most promising
+  untried lead and do it.
+- **"Stuck" never means "hand off."** It means: drop THIS approach and pick a
+  DIFFERENT lead -- another identity (`roster`/`spray`), another service, another
+  attack class. `note stuck` is a breadcrumb you leave yourself, not a request
+  for help, and not a reason to pause.
+- **Each foothold's job is finding the NEXT identity or privilege.** Flags come
+  from reaching the right account -- hunt credentials, not flag files. Before
+  you believe you're out of options, run `roster show` and re-read
+  `notes/STATE.md`: there is almost always an untested identity, an unread
+  share, or an unexamined service left. "I'm not sure how to proceed" is a
+  prompt to enumerate more, not to stop.
+
 ## Golden Rules
 
 1. **Simple access before complex attacks.** Check file shares, readable
@@ -8,11 +27,19 @@
    often a file sitting in a share readable by a credential you already own.
    Run `nxc smb <T> -u <U> -p <P> --shares` and actually LIST the contents
    of every readable share.
-2. **Use EVERY compromised identity.** When you obtain a new credential, hash,
-   or ticket, IMMEDIATELY test it across all protocols and enumerate what it
-   can access. Different accounts see different shares, services, and ACLs.
-   Don't fixate on your first identity -- each new one is a new attack surface.
-   Record it with `note cred` and test it against every known target.
+2. **Use EVERY identity -- don't fixate on your first.** Different accounts see
+   different shares, services, and ACLs, so each one is new attack surface.
+   This is mechanical, not optional:
+   - As you discover account names (from LDAP, RID brute, shares, configs),
+     add them: `roster add alice bob svc_sql`. `roster show` lists who you have
+     NOT tested yet. `note-from-msf` feeds the roster automatically.
+   - The moment you get ANY password or hash, test it against the WHOLE roster
+     in one shot: `spray <dc-or-host> '<secret>'` (also `spray <host> <hash>`).
+     It records valid logins and marks who's been tested.
+   - A valid hit is a new identity: `note cred` it (spray does this for you) and
+     enumerate what IT can reach -- shares, WinRM, ACLs -- before moving on.
+   Before you conclude a box is stuck, run `roster show`: untested identities
+   left means you have unexplored attack surface.
 3. **Enumerate capabilities, not just existence.** For every owned principal,
    ask "what does this let me DO?" and map it to an attack primitive.
    "I can write an attribute" is not a finding; "GenericWrite on a user ->
@@ -20,10 +47,11 @@
 4. **Research the symptom, don't retry.** A malformed artifact (zero-key ticket,
    integrity error, access denied) is a *diagnosis* with a known fix, not a
    reason to re-run the same command. Search the exact error string.
-5. **Timebox every dead-end.** If a single sub-problem (a shell, a tool, a
-   payload) eats >15 min or >10 tool calls without progress, STOP. Record the
-   blocker with `note stuck '<what, what you tried, why each failed>'`, then
-   either research the symptom or reset the environment.
+5. **Timebox every dead-end -- then switch, don't quit.** If a single
+   sub-problem (a shell, a tool, a payload) eats >15 min or >10 tool calls
+   without progress, stop pushing THAT sub-problem -- not the box. Leave a
+   breadcrumb (`note stuck '<what, tried, why>'`), then move to a different lead:
+   another identity, another service, or research the exact error symptom.
 6. **Never re-run a command you've already run.** You already have its output,
    whether it succeeded or failed -- running it again tells you nothing new. If
    the result didn't move you forward, change the method, tool, or inputs, or
@@ -41,15 +69,19 @@
       note cred    'svc_acct : Summer2026! -- valid on DC01 (kerberoast)'
       note service '10.10.11.5:445 smb Samba 4.15 -- signing off'
       note access  'www-data on web01 -- regain: curl http://10.10.11.5/s.php?c=id'
+  ACCESS is the "regain" slot: every shell/session gets a bullet with the exact
+  command to reconnect. If you lose a shell, re-read ACCESS -- don't reinvent.
+  Keep each bullet to ONE line: who @ where -- regain command.
       note failed  'anonymous SMB on 10.10.11.5 -- NT_STATUS_ACCESS_DENIED'
       note next    'try ESC1 with the Web template'
       note rm next 'ESC1'            # drop a bullet once done or wrong
   Text containing a `'`: pass it on stdin instead (`note cred <<'EOF'` ...
   `EOF`). `note` echoes what it stored -- check secrets came through intact.
 - Sections: scope access cred service finding failed next stuck.
-- After 3 failed attempts on the SAME vector, before switching approaches, run
-  `note stuck '<what, what you tried, why each failed>'` -- it also logs to
-  notes/STUCK.md for human review.
+- After 3 failed attempts on the SAME vector, record it with
+  `note stuck '<what, what you tried, why each failed>'` and then SWITCH to a
+  different lead. This is a breadcrumb (it also lands in notes/STUCK.md for later
+  review) -- logging it is not asking for help and not a reason to pause.
 - After `db_nmap` or any MSF scanner/login module, run `note-from-msf`: it
   copies open services and creds from the MSF database onto the board.
 - STATE.md is the short board. Depth (per-host/app detail, key output) goes in
@@ -99,26 +131,26 @@ search_modules("<service>")                         # broader MSF search
 safe-run nuclei -u <TARGET> -as                     # auto-detect + scan
 ```
 
-### Phase 3: Map capabilities (MANDATORY after any foothold)
-Every time you gain a credential, shell, token, ticket, or file access,
-run this checklist. **Do it for EVERY new identity, not just the first.**
+### Phase 3: Post-foothold sweep (MANDATORY for every new identity)
+Every foothold's job is finding the NEXT identity or privilege level.
+Flags come from reaching the right account -- hunt credentials, not files.
 
-**Simple access first (before complex AD attacks):**
-- **Shares**: `nxc smb <T> -u <U> -p <P> --shares` with EVERY owned identity,
-  then `smbclient` to LIST and READ contents of every readable share.
-  Flag `.vmem/.vhd/.kdbx/.kirbi/Unattend.xml/GPP` files, scripts, configs.
-  A share empty to one identity may have critical files for another.
-- **Lateral move**: `nxc winrm/smb/rdp <T> -u <U> -p <P>` -- does this
-  identity get `Pwn3d!` on any target the previous one didn't?
-- **Direct flag**: can you just read `user.txt`/`root.txt` via SMB or a shell?
+Run this for EVERY new credential, shell, token, or file access:
+1. **Who am I?** `whoami /priv` / `id` / `sudo -l` / `whoami /groups` / `klist`
+2. **Credential material on this host**: config files, stored creds, hashes,
+   keys, tokens, memory dumps, browser data, DPAPI, SSH keys, `.kdbx`.
+   Flag `.vmem/.vhd/.kirbi/Unattend.xml/GPP` files, scripts, backups.
+3. **What can this identity reach?** `spray <host> '<secret>'` the whole roster,
+   then `nxc smb <T> -u <U> -p <P> --shares` and LIST every readable share.
+   Check: does this identity get `Pwn3d!` on any target the previous didn't?
+4. **Local privesc paths**: SUID/sudo/capabilities, service misconfigs, cron,
+   scheduled tasks, writable service binaries, kernel exploits
+5. **AD rights** (if domain-joined): ACLs on other objects, delegation, group
+   membership -> load `@ad` for the ACL-to-attack matrix
+6. **Then check flags**: `cat /root/root.txt` or read via SMB -- but only
+   AFTER steps 1-5. The flag is a byproduct of having the right access.
 
-**Then deeper enumeration:**
-- **Shell**: `whoami /priv` / `id` / `sudo -l`. Note privileges that change
-  what's possible (SeDebugPrivilege, SeBackupPrivilege, sudo entries).
-- **AD ACLs**: enumerate what this identity can *do* to other objects. Load `@ad`.
-- **Files**: a memory/disk image = offline SAM/LSASS. Load `@forensics`.
-
-Record each mapped capability: `note finding '<principal> -> <right> -> <attack>'`.
+Record each finding: `note finding '<principal> -> <right> -> <attack>'`.
 
 ### Phase 4: Exploit the most promising lead
 If it fails, go back to Phase 2 with different search terms (product name,
@@ -142,6 +174,7 @@ Search the web for `<service> <version> CVE` or the exact error string.
 | `creds-and-loot` | Whenever a credential, hash, ticket, or flag is obtained |
 | `pivoting` | When a foothold sees networks the attacker cannot reach |
 | `web-recon` | When a web application or API is discovered on a target |
+| `windows-access` | Connecting to a Windows target with known credentials, or using RDP |
 | `wiki` | Recording per-host/app detail; searching what you already know |
 
 ### References (load with @name when the topic comes up)
@@ -179,79 +212,9 @@ The MCP server's parameter parsing can be strict. For complex chains:
 
 ---
 
-## Windows Target Playbook (Credential-Based Access)
-
-Use this priority order. Only fall back to RDP if all text-based methods fail
-or the challenge explicitly requires GUI interaction.
-
-### 1. Evil-WinRM (port 5985-5986)
-```bash
-safe-run evil-winrm -i <TARGET> -u <USER> -p '<PASS>'
-safe-run evil-winrm -i <TARGET> -u <USER> -H <NTLM>   # pass-the-hash
-```
-Full PowerShell session. Upload/download files. Load PS scripts with `-s`.
-
-### 2. Impacket psexec / wmiexec / smbexec
-```bash
-safe-run impacket-psexec '<DOMAIN>/<USER>:<PASS>@<TARGET>'
-safe-run impacket-wmiexec '<DOMAIN>/<USER>:<PASS>@<TARGET>'
-safe-run impacket-smbexec '<DOMAIN>/<USER>:<PASS>@<TARGET>'
-```
-`wmiexec` is stealthier; `psexec` gives SYSTEM; `smbexec` when psexec blocked.
-
-### 3. Impacket secretsdump (no shell needed)
-```bash
-safe-run impacket-secretsdump '<DOMAIN>/<USER>:<PASS>@<TARGET>'
-```
-
-### 4. NetExec (credential validation + quick enum)
-```bash
-safe-run netexec smb <TARGET> -u <USER> -p '<PASS>'        # Pwn3d! = admin
-safe-run netexec winrm <TARGET> -u <USER> -p '<PASS>'
-safe-run netexec smb <TARGET> -u <USER> -p '<PASS>' --shares --users
-```
-
-### 5. SMB direct file access
-```bash
-safe-run smbclient '//<TARGET>/C$' -U '<DOMAIN>/<USER>%<PASS>'
-```
-If you know the flag path, just `get` it. No shell needed.
-
----
-
-## RDP Playbook (GUI-Required Challenges Only)
-
-`agent-rdp` runs as a headless protocol client with UI Automation support.
-
-### Quick-Start
-```bash
-safe-run agent-rdp connect --host <IP> --username <USER> --password '<PASS>' --enable-win-automation
-safe-run agent-rdp automate snapshot -i          # accessibility tree (preferred)
-safe-run agent-rdp screenshot --output /workspace/loot/screenshots/desktop.png
-safe-run agent-rdp mouse click @e1               # click by element index
-safe-run agent-rdp clipboard set "whoami /priv"  # clipboard for reliable typing
-safe-run agent-rdp keyboard press "ctrl+v"
-safe-run agent-rdp keyboard press enter
-safe-run agent-rdp disconnect
-```
-
-### Rules
-1. **Inspect trees before pixels.** `automate snapshot -i` first; target by
-   semantic index (`@e1`). Only fall back to coordinates for canvas controls.
-2. **Clipboard over keystrokes.** `clipboard set` + `ctrl+v` prevents dropped
-   characters.
-3. **Batch actions.** Plan sequences, execute, wait 2-3s, then snapshot once.
-4. **Abandon after 5 min of fighting.** Try evil-winrm, wmiexec, or smbclient.
-
-### Opening Applications
-```bash
-safe-run agent-rdp keyboard press super
-sleep 1
-safe-run agent-rdp keyboard type "cmd"
-safe-run agent-rdp keyboard press enter
-sleep 2
-safe-run agent-rdp automate snapshot -i
-```
+## Windows/RDP access (load `windows-access` skill for full commands)
+Evil-WinRM > impacket (psexec/wmiexec/smbexec) > secretsdump > nxc > smbclient.
+Only fall back to RDP (`agent-rdp`) if all text-based methods fail or GUI required.
 
 ---
 

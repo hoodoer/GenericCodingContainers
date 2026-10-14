@@ -5,6 +5,7 @@ _Updated: never_
 ## Scope
 
 ## Access
+> Each foothold: who @ where -- regain command (exact command to reconnect).
 
 ## Credentials
 

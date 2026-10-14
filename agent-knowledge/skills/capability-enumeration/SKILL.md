@@ -15,14 +15,20 @@ attacking.
 accounts see different shares, services, and ACL paths. The account you
 ignore is often the one that has the access you need.
 
+**Before the per-account checks below, spray the new secret across everyone:**
+`spray <dc-or-host> '<secret>'` tests it against the whole account roster in one
+call and records the hits. `roster show` tells you which identities you still
+haven't tested -- untested accounts are unexplored attack surface, so don't
+declare a box stuck while any remain.
+
 ### Step 1: Simple access first (before any AD attack chain)
 - `nxc smb <T> -u <U> -p '<P>' --shares` -- list shares, then **actually
   browse the contents** of every readable share with `smbclient`. Look for
   files: configs, scripts, backups, memory dumps, credentials.
 - `nxc winrm <T> -u <U> -p '<P>'` -- can I get a shell? (`Pwn3d!` = yes)
-- `nxc smb <T> -u <U> -p '<P>' -x 'type C:\Users\<user>\Desktop\user.txt'`
-  -- can I just read the flag directly?
 - Check web apps, MSSQL, SSH, FTP with the new cred.
+- Read the flag only AFTER enumerating everything above:
+  `nxc smb <T> -u <U> -p '<P>' -x 'type C:\Users\<user>\Desktop\user.txt'`
 
 ### Step 2: AD enumeration (only after simple access is checked)
 - Enumerate what the account can *do* to other objects (ACLs, group

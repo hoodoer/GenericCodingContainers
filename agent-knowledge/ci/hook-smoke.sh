@@ -14,10 +14,19 @@
 set -uo pipefail
 
 PLUGIN_DIR="${1:-/opt/pentest-agent/plugins}"
-# Hooks each plugin must still export (plugin basename -> space-separated hooks).
-REQUIRED_HOOKS="experimental.session.compacting event"
+# Hooks each plugin must still export, keyed by basename. A plugin with no entry
+# here is only checked for loading cleanly.
+hooks_for() {
+    case "$1" in
+        00-checkpoint.js)  echo "experimental.session.compacting event" ;;
+        10-loop-breaker.js) echo "tool.execute.before" ;;
+        20-roster-autofeed.js) echo "tool.execute.after" ;;
+        30-foothold-trigger.js) echo "tool.execute.after" ;;
+        *)                 echo "" ;;
+    esac
+}
 # Hook-name strings the plugins depend on OpenCode still calling.
-OPENCODE_HOOKS="experimental.session.compacting tool.execute.before"
+OPENCODE_HOOKS="experimental.session.compacting tool.execute.before tool.execute.after"
 
 fail=0
 
@@ -30,6 +39,7 @@ if [ ${#plugins[@]} -eq 0 ]; then
     echo "[hook-smoke] no plugins in $PLUGIN_DIR -- nothing to check."
 else
     for p in "${plugins[@]}"; do
+        req="$(hooks_for "$(basename "$p")")"
         if node --input-type=module -e '
           import { pathToFileURL } from "node:url";
           const need = process.argv[2].split(" ").filter(Boolean);
@@ -39,8 +49,8 @@ else
           const hooks = await factory({ directory: "/tmp" });
           const missing = need.filter((h) => typeof hooks?.[h] !== "function");
           if (missing.length) { console.error("  missing hook(s): " + missing.join(", ")); process.exit(1); }
-        ' "$p" "$REQUIRED_HOOKS"; then
-            echo "[hook-smoke] OK   $(basename "$p") exports: $REQUIRED_HOOKS"
+        ' "$p" "$req"; then
+            echo "[hook-smoke] OK   $(basename "$p") loads${req:+ (exports: $req)}"
         else
             echo "[hook-smoke] FAIL $(basename "$p") did not load / is missing a hook"
             fail=1
