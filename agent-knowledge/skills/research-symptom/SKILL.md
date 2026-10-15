@@ -9,9 +9,11 @@ description: How to research failures and versions - local exploit DBs first, th
 1. **Local first.** `searchsploit <service> <version>`, Metasploit
    `search_exploits`/`search_modules`, `nuclei -as`, bundled `@references`.
    Thousands of ready exploits need no internet round-trip.
-2. **Then web, keyed on the symptom.** Search the *literal error string*
-   (e.g. `KRB_AP_ERR_BAD_INTEGRITY ccache zero session key`) or
-   `<service> <version> CVE`. Error strings have canonical causes and fixes.
+2. **Then web, keyed on the symptom.** Use `websearch` (local SearXNG, no
+   CAPTCHA). Search the *literal error string*
+   (e.g. `websearch 'KRB_AP_ERR_BAD_INTEGRITY ccache zero session key'`) or
+   `websearch '<service> <version> CVE'`. To read a result page:
+   `websearch --url '<url>'`. Error strings have canonical causes and fixes.
 3. **Never search the box name** for a walkthrough/writeup -- that spoils the
    challenge instead of exercising the methodology.
 

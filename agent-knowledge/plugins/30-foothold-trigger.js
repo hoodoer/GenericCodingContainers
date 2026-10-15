@@ -4,17 +4,23 @@
 // When bash output shows a new identity context (Pwn3d!, new session, root
 // shell, SYSTEM), appends a one-line reminder to the tool output telling the
 // model to run the post-foothold sweep checklist before looking for flags.
-// A cooldown prevents the reminder from firing on every subsequent command.
+//
+// Signals split into two classes:
+//   - "once": persistent contexts (root, SYSTEM, meterpreter) — fire the first
+//     time they appear in a session, then never again. The model already knows
+//     it has that access; re-firing on every command through the mount is noise.
+//   - "every": discrete events (Pwn3d!, new session, Evil-WinRM, secretsdump)
+//     — fire each time with a cooldown, because each one may be a new identity.
 import { appendFileSync, mkdirSync } from "node:fs";
 
 const SIGNALS = [
-  /Pwn3d!/,                                    // nxc admin confirmation
-  /session \d+ opened/i,                       // Metasploit session
-  /Evil-WinRM\s+shell/i,                       // Evil-WinRM connected
-  /\buid=0\(root\)/,                           // Linux root
-  /\bNT AUTHORITY\\SYSTEM\b/i,                 // Windows SYSTEM
-  /meterpreter\s*>/i,                          // Meterpreter prompt
-  /\[\+\].*\bDumping\b.*\b(?:SAM|LSA|NTDS)\b/i, // secretsdump hashes
+  { re: /Pwn3d!/,                                     once: false },
+  { re: /session \d+ opened/i,                        once: false },
+  { re: /Evil-WinRM\s+shell/i,                        once: false },
+  { re: /\[\+\].*\bDumping\b.*\b(?:SAM|LSA|NTDS)\b/i, once: false },
+  { re: /\buid=0\(root\)/,                            once: true },
+  { re: /\bNT AUTHORITY\\SYSTEM\b/i,                  once: true },
+  { re: /meterpreter\s*>/i,                           once: true },
 ];
 
 const REMINDER =
@@ -23,11 +29,12 @@ const REMINDER =
   "on this host (3) spray the roster (4) privesc paths (5) AD rights. " +
   "Flags are LAST — step 6.";
 
-const COOLDOWN = 5;  // skip N bash calls after a trigger before re-arming
+const COOLDOWN = 5;  // skip N bash calls after an "every" trigger before re-arming
 
 export const FootholdTriggerPlugin = async ({ directory } = {}) => {
   const root = directory || "/workspace";
   const countdown = new Map();   // sessionID -> remaining bash calls to skip
+  const onceFired = new Map();   // sessionID -> Set of signal indices already fired
 
   const log = (line) => {
     try {
@@ -52,8 +59,16 @@ export const FootholdTriggerPlugin = async ({ directory } = {}) => {
                  : typeof output?.metadata?.output === "string" ? output.metadata.output : "";
       if (!text) return;
 
-      const hit = SIGNALS.find((re) => re.test(text));
-      if (!hit) return;
+      const hitIdx = SIGNALS.findIndex((s) => s.re.test(text));
+      if (hitIdx === -1) return;
+      const sig = SIGNALS[hitIdx];
+
+      if (sig.once) {
+        const fired = onceFired.get(sid) || new Set();
+        if (fired.has(hitIdx)) return;   // already reminded for this context
+        fired.add(hitIdx);
+        onceFired.set(sid, fired);
+      }
 
       if (typeof output?.output === "string") {
         output.output += REMINDER;
@@ -61,8 +76,8 @@ export const FootholdTriggerPlugin = async ({ directory } = {}) => {
         output.metadata.output += REMINDER;
       }
 
-      countdown.set(sid, COOLDOWN);
-      log(`FOOTHOLD TRIGGER fired: ${hit.toString().slice(0, 60)}`);
+      if (!sig.once) countdown.set(sid, COOLDOWN);
+      log(`FOOTHOLD TRIGGER fired: ${sig.re.toString().slice(0, 60)}`);
     },
   };
 };

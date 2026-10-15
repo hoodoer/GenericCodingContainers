@@ -85,6 +85,21 @@ showmount -e <target>
 # If no_root_squash: mount, create SUID binary as root, execute on target
 ```
 
+### Kernel exploits
+- **Dirty Pipe (CVE-2022-0847)** — kernel 5.8 to 5.16.11/5.15.25/5.10.102.
+  Overwrite read-only files via pipe page cache splice. Write to `/etc/passwd`
+  or overwrite a SUID binary. Check: `uname -r`.
+- **Dirty COW (CVE-2016-5195)** — kernel < 4.8.3. Race condition in
+  copy-on-write. Overwrite `/etc/passwd` or SUID binary. Very reliable.
+- Search `searchsploit linux kernel <version>` for version-specific exploits.
+
+### Process monitoring with pspy
+```bash
+# Monitor all processes without root (cron, background tasks, root commands)
+./pspy64 -f -i 1000
+# Watch for periodic root processes — writable scripts called by root = instant privesc
+```
+
 ## Automated tools (if available in container)
 ```bash
 # LinPEAS

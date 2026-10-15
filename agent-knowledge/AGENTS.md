@@ -12,6 +12,13 @@ with the access and tools you already have.
   DIFFERENT lead -- another identity (`roster`/`spray`), another service, another
   attack class. `note stuck` is a breadcrumb you leave yourself, not a request
   for help, and not a reason to pause.
+- **Before declaring any attack surface dead, review your parked paths.** Run
+  `note show`, read the "Parked paths" section, and for EACH entry: load the
+  `@reference` for that topic (`@adcs`, `@ad`, `@linux`, etc.) and check whether
+  you tried every technique listed, not just the first one. A path you parked
+  because one technique failed may have three others you never tried. Ask:
+  "did I check all capabilities of this identity against this surface, or only
+  the obvious ones?"
 - **Each foothold's job is finding the NEXT identity or privilege.** Flags come
   from reaching the right account -- hunt credentials, not flag files. Before
   you believe you're out of options, run `roster show` and re-read
@@ -72,12 +79,12 @@ with the access and tools you already have.
   ACCESS is the "regain" slot: every shell/session gets a bullet with the exact
   command to reconnect. If you lose a shell, re-read ACCESS -- don't reinvent.
   Keep each bullet to ONE line: who @ where -- regain command.
-      note failed  'anonymous SMB on 10.10.11.5 -- NT_STATUS_ACCESS_DENIED'
+      note parked  'anonymous SMB on 10.10.11.5 -- NT_STATUS_ACCESS_DENIED'
       note next    'try ESC1 with the Web template'
       note rm next 'ESC1'            # drop a bullet once done or wrong
   Text containing a `'`: pass it on stdin instead (`note cred <<'EOF'` ...
   `EOF`). `note` echoes what it stored -- check secrets came through intact.
-- Sections: scope access cred service finding failed next stuck.
+- Sections: scope access cred service finding parked next stuck.
 - After 3 failed attempts on the SAME vector, record it with
   `note stuck '<what, what you tried, why each failed>'` and then SWITCH to a
   different lead. This is a breadcrumb (it also lands in notes/STUCK.md for later
@@ -157,8 +164,15 @@ If it fails, go back to Phase 2 with different search terms (product name,
 protocol, vulnerability class). Do NOT retry unchanged.
 
 ### Phase 5: External research (only after local sources exhausted)
-Search the web for `<service> <version> CVE` or the exact error string.
-**Never search for the box name, walkthrough, or writeup.**
+Use `websearch` to search the web — it hits a local SearXNG instance (no
+CAPTCHA, no bot-blocking). Never search for the box name, walkthrough, or
+writeup. Good searches: `<service> <version> CVE`, exact error strings,
+technique names.
+```bash
+websearch '<service> <version> exploit'
+websearch -n 10 '<exact error message>'
+websearch --url 'https://...'           # fetch and extract text from a URL
+```
 
 ---
 
@@ -237,6 +251,16 @@ Load `@env` for NAT/routing gotchas when setting up tunnels.
 - **pypykatz**: parse LSASS dumps on Linux without volatility.
 - **PKINITtools**: `gettgtpkinit.py`, `gets4uticket.py` for cert-based auth.
 - **petitpotam.py**: NTLM coercion for ADCS relay attacks.
+- **websearch**: `websearch '<query>'` — local SearXNG search, no bot-blocking.
+  `websearch --url '<url>'` fetches and extracts text. Use instead of `curl`ing
+  search engines directly.
 
-## Output
-- Save all loot, hashes, and flags to `/workspace/loot/`.
+## Output & workspace hygiene
+- Save all loot, hashes, certs, keys, ccaches, and flags to `/workspace/loot/`.
+  certipy/impacket sometimes dump to the current directory — move them to `loot/`.
+- Custom scripts you write go in `/workspace/tools/` (create it if needed), not
+  the workspace root. One-liners in bash are fine; anything you save as a `.py`
+  or `.sh` file belongs in `tools/`.
+- If you modify a system tool in `/usr/local/bin/`, record it immediately:
+  `note finding 'modified <tool>: <what and why>'` — you will forget after
+  compaction.

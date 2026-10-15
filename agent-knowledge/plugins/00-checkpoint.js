@@ -83,8 +83,19 @@ export const CheckpointPlugin = async ({ client, directory } = {}) => {
         state = state.slice(0, MAX_STATE) + "\n...(truncated; the full board is notes/STATE.md)";
       }
       output.context.push(checkpoint(state));
+      const nextCount = (state.match(/^- (?!STUCK:)/gm) || []).length;
+      const nextSection = state.split(/^## Next$/m)[1] || "";
+      const nextItems = (nextSection.split(/^## /m)[0].match(/^- /gm) || []).length;
+      let extra = "";
+      if (nextItems > 5) {
+        extra = ` | ⚠ ${nextItems} items in Next — prune stale leads (note rm next '<done>')`;
+        output.context.push(
+          `The Next section has ${nextItems} items. Before adding more leads, prune entries ` +
+          "that are done, wrong, or superseded. Stale leads waste your attention after compaction."
+        );
+      }
       const n = (read(runLog).match(/ compaction #\d+:/g) || []).length + 1;
-      run(`compaction #${n}: STATE.md injected (${state.length} bytes)`);
+      run(`compaction #${n}: STATE.md injected (${state.length} bytes)${extra}`);
     },
 
     event: async ({ event } = {}) => {

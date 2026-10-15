@@ -13,6 +13,7 @@ _Updated: never_
 
 ## Findings
 
-## Tried & failed (DO NOT REPEAT)
+## Parked paths (revisit when stuck or when you gain new info/identity)
+> Don't repeat the same command -- but DO reload the @reference and check for techniques you haven't tried.
 
 ## Next

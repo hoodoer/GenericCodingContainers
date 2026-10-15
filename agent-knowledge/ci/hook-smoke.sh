@@ -22,6 +22,7 @@ hooks_for() {
         10-loop-breaker.js) echo "tool.execute.before" ;;
         20-roster-autofeed.js) echo "tool.execute.after" ;;
         30-foothold-trigger.js) echo "tool.execute.after" ;;
+        40-tool-tracker.js) echo "tool.execute.after" ;;
         *)                 echo "" ;;
     esac
 }

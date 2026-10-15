@@ -37,6 +37,11 @@ declare a box stuck while any remain.
 - Check: can I DCSync, read LAPS/gMSA, reset someone's password, add myself
   to a group, create objects, write SPNs (Kerberoast), write delegation
   attributes (RBCD)?
+- ADCS: if `certipy find -vulnerable` shows nothing exploitable, check for
+  **phantom templates** -- templates the CA publishes but that don't exist
+  in AD. If your account is in `Template_Editors` or similar, you can create
+  the missing template as ESC1-vulnerable. Load `@adcs` for the full
+  technique.
 - Run BloodHound collection: `bloodhound-python -d <dom> -u <user> -p '<pass>' -dc <DC> -c all`
 
 ## For a low-priv shell

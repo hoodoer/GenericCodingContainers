@@ -18,7 +18,7 @@ import { dirname } from "node:path";
 const WINDOW = 12;     // how many recent bash commands to remember per session
 const THRESHOLD = 3;   // same normalized command this many times in the window -> trip
 const EXEMPT = new Set(["note", "assess", "wiki", "lesson", "export-session",
-                        "note-from-msf", "roster", "cat", "ls", "cd", "pwd"]);
+                        "note-from-msf", "roster", "websearch", "cat", "ls", "cd", "pwd"]);
 
 const history = new Map();   // sessionID -> [normalized command, ...]
 
@@ -63,7 +63,11 @@ export const LoopBreakerPlugin = async ({ directory } = {}) => {
         "Running it again returns the same thing you already have. Do NOT reissue it. Instead:",
         "  1. note show        — re-read the state board; the answer may already be recorded",
         "  2. change the approach: a different tool, different inputs, or a different lead",
-        "  3. if this vector is a dead end: note stuck '<what, what you tried, why>' then move on",
+        "  3. RECONSIDER PARKED PATHS: re-read the 'Parked paths' section of STATE.md.",
+        "     For each parked path, load its @reference and check: did you try every",
+        "     variant/technique listed there, or only the obvious one? A parked path",
+        "     with untried techniques is NOT a dead end.",
+        "  4. if truly exhausted: note stuck '<what, what you tried, why>' then move on",
       ].join("\n");
       output.args.command = `printf '%s\\n' ${sq(msg)}`;
     },

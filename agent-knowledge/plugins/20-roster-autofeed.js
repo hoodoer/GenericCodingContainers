@@ -47,12 +47,23 @@ const EMAIL_FREEMAIL = new Set(["gmail.com", "googlemail.com", "outlook.com",
   "test.com", "domain.com", "company.com", "acme.com", "sentry.io", "github.com"]);
 // Windows built-in group/principal name fragments that appear as email
 // local-parts when BloodHound dumps "DOMAIN ADMINS@CORP.HTB" style output.
-const BUILTIN_NAMES = new Set(["administrators", "admins", "users", "guests",
+// Also covers AD container/OU names that leak from LDAP enumeration.
+const BUILTIN_NAMES = new Set([
+  // Windows built-in groups/principals
+  "administrators", "admins", "users", "guests",
   "operators", "controllers", "servers", "builders", "readers", "replicator",
   "everyone", "interactive", "access", "authority", "group", "system",
   "service", "network", "batch", "enterprise", "iis_iusrs", "creator",
   "owner", "terminal", "certificate", "cloneable", "compatible", "computers",
-  "denied", "incoming", "outgoing", "performance", "protected", "schema"]);
+  "denied", "incoming", "outgoing", "performance", "protected", "schema",
+  // AD infrastructure containers and well-known objects
+  "foreignsecurityprincipals", "policies", "policytype", "policytemplate",
+  "wmipolicy", "som", "compartitions", "compartitionsets", "adminsdholder",
+  "dnsupdateproxy", "dnsadmins", "domaincontrollers", "managedserviceaccounts",
+  "ntds", "tpm", "infrastructure", "lostandfound", "programdata",
+  // Common AD group names that aren't personal accounts
+  "contractors", "external", "internal", "vendors",
+]);
 
 function usersFromText(text) {
   const out = new Set();
@@ -101,7 +112,7 @@ export const RosterAutofeedPlugin = async ({ directory } = {}) => {
         const lp = m[1].toLowerCase().split("+")[0];
         const dom = m[2].toLowerCase();
         if (EMAIL_ROLE.has(lp) || EMAIL_FREEMAIL.has(dom)) continue;
-        if (BUILTIN_NAMES.has(lp)) continue;
+        if (BUILTIN_NAMES.has(lp) || SKIP.has(lp)) continue;
         const pre = text.substring(Math.max(0, m.index - 50), m.index);
         if (/[A-Z]{2,}[ \t]+$/.test(pre)) continue;
         if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(lp)) continue;

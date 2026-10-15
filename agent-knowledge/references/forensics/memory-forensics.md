@@ -78,6 +78,40 @@ impacket-secretsdump \
 chntpw -l /mnt/disk/Windows/System32/config/SAM
 ```
 
+## DPAPI Offline Extraction
+Decrypt DPAPI-protected secrets (browser passwords, credential manager, Wi-Fi
+keys) from disk. Need: master key file + user password (or domain backup key).
+```bash
+# Decrypt a user's DPAPI master key (need their password + SID)
+impacket-dpapi masterkey -file <MasterKeyFile> -sid <UserSID> -password '<pass>'
+
+# Decrypt a credential blob with the decrypted key
+impacket-dpapi credential -file <CredBlob> -key <HexKey>
+
+# pypykatz: batch DPAPI decryption
+pypykatz dpapi prekey password <SID> '<password>'
+pypykatz dpapi masterkey <MasterKeyFile> <PreKey>
+pypykatz dpapi blob <Blob> -mkb <DecryptedMKBytes>
+
+# SharpDPAPI (from Windows shell)
+.\SharpDPAPI.exe triage /password:<pass>
+.\SharpDPAPI.exe masterkeys /password:<pass>
+```
+Machine DPAPI keys: extract from SYSTEM + SECURITY registry hives (see
+hive extraction above). Needed for system-level DPAPI blobs (scheduled
+task credentials, service account passwords).
+
+## Mimikatz Offline (LSASS dump analysis)
+```bash
+# Dump LSASS process memory from a memory image
+vol -f image.vmem windows.pslist.PsList | grep lsass
+vol -f image.vmem -o /workspace/loot/ windows.memmap.Memmap --pid <LSASS_PID> --dump
+
+# Parse the dump on Linux (no mimikatz needed)
+pypykatz lsa minidump /workspace/loot/pid.<PID>.dmp
+# Output: NTLM hashes, Kerberos tickets, wdigest passwords, DPAPI keys
+```
+
 ## Rules
 - Hive **offsets are per-image** -- read them from *your* `hivelist` output,
   never hardcode another box's offsets.
