@@ -23,6 +23,12 @@ const SIGNALS = [
   { re: /meterpreter\s*>/i,                           once: true },
 ];
 
+// SSH login success: command starts with ssh/sshpass AND output has a
+// login banner (Last login, Welcome, motd markers) without auth failure.
+const SSH_CMD = /^\s*(?:ssh|sshpass)\b/;
+const SSH_SUCCESS = /(?:Last login:|Welcome to|Linux \S+ \d+\.\d+|Ubuntu|Debian|CentOS)/i;
+const SSH_FAIL = /(?:Permission denied|Connection refused|Connection closed|No route to host|Could not resolve|Host key verification failed)/i;
+
 const REMINDER =
   "\n\n⚡ NEW FOOTHOLD — run the post-foothold sweep (Phase 3) BEFORE " +
   "hunting flags. Checklist: (1) whoami/id/privs (2) credential material " +
@@ -65,16 +71,26 @@ export const FootholdTriggerPlugin = async ({ directory } = {}) => {
       const cmd = typeof input?.args?.command === "string" ? input.args.command : "";
       const isRead = /^\s*(?:cat|head|tail|less|more|grep|strings|file|xxd|curl|wget|websearch|searchsploit|man|apt|dpkg)\b/.test(cmd);
 
-      const hitIdx = SIGNALS.findIndex((s) => s.re.test(text));
-      if (hitIdx === -1) return;
-      if (isRead) return;   // signal appeared in static output, not a live shell
-      const sig = SIGNALS[hitIdx];
+      // Check standard signals first, then SSH login as a separate path.
+      let hitIdx = SIGNALS.findIndex((s) => s.re.test(text));
+      let isSsh = false;
+      if (hitIdx === -1) {
+        if (SSH_CMD.test(cmd) && SSH_SUCCESS.test(text) && !SSH_FAIL.test(text)) {
+          isSsh = true;
+        } else {
+          return;
+        }
+      }
+      if (isRead && !isSsh) return;   // signal appeared in static output, not a live shell
 
-      if (sig.once) {
-        const fired = onceFired.get(sid) || new Set();
-        if (fired.has(hitIdx)) return;   // already reminded for this context
-        fired.add(hitIdx);
-        onceFired.set(sid, fired);
+      if (!isSsh) {
+        const sig = SIGNALS[hitIdx];
+        if (sig.once) {
+          const fired = onceFired.get(sid) || new Set();
+          if (fired.has(hitIdx)) return;
+          fired.add(hitIdx);
+          onceFired.set(sid, fired);
+        }
       }
 
       if (typeof output?.output === "string") {
@@ -83,8 +99,9 @@ export const FootholdTriggerPlugin = async ({ directory } = {}) => {
         output.metadata.output += REMINDER;
       }
 
-      if (!sig.once) countdown.set(sid, COOLDOWN);
-      log(`FOOTHOLD TRIGGER fired: ${sig.re.toString().slice(0, 60)}`);
+      const isOnce = !isSsh && SIGNALS[hitIdx].once;
+      if (!isOnce) countdown.set(sid, COOLDOWN);
+      log(`FOOTHOLD TRIGGER fired: ${isSsh ? "SSH login" : SIGNALS[hitIdx].re.toString().slice(0, 60)}`);
     },
   };
 };

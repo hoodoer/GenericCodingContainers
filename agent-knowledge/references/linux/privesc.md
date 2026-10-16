@@ -100,6 +100,17 @@ showmount -e <target>
 # Watch for periodic root processes — writable scripts called by root = instant privesc
 ```
 
+### Credential Leak via Process Arguments
+Root timers, cron jobs, and daemons that pass secrets on the command line
+(`--password`, `--token`, `-p`) leak them to any local user via:
+```bash
+ps auxww | grep -iE '\-\-pass|\-\-token|\-p '
+cat /proc/*/cmdline 2>/dev/null | tr '\0' ' ' | grep -iE 'pass|token|secret'
+watch -n1 'ps auxww | grep root'
+```
+Common targets: `clickhouse-client --password`, `mysql -p`, `curl -u`,
+`smbclient -U%`, database backup scripts with inline creds.
+
 ## Automated tools (if available in container)
 ```bash
 # LinPEAS

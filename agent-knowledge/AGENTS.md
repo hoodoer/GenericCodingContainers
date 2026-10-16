@@ -120,10 +120,18 @@ NOT a lesson: anything true only on THIS box -- that goes in the wiki or notes.
 At the end of a box, run `/retro` to capture one closing lesson.
 
 ## Assessment write-up -- `ASSESSMENT.md` (for the human report)
-When you CONFIRM something reportable (foothold, valid cred, exploitable vuln,
-flag), append an entry -- what it is, impact, exact repro, evidence path:
+When you CONFIRM something reportable (foothold, valid cred, exploitable vuln),
+append an entry -- what it is, impact, exact repro, evidence path:
     assess 'SQLi in /login (auth bypass)' 'POST user=... bypasses auth. Repro: <cmd>. Evidence: loot/logs/<file>.log'
 Terse operational state stays in STATE.md; don't mix the two.
+
+## Capturing flags -- `flag`
+When you read a flag hash, record it immediately:
+    flag user <hash>
+    flag root <hash>
+This saves the hash to `loot/flags.txt`, writes an ASSESSMENT.md entry, and
+notes the access level on the state board -- all in one command.
+`spray` also auto-assesses when it confirms admin access (Pwn3d!).
 
 ---
 
@@ -181,8 +189,9 @@ Run this for EVERY new credential, shell, token, or file access:
    f. Kernel exploits — LAST resort, only after a-e are exhausted
 5. **AD rights** (if domain-joined): ACLs on other objects, delegation, group
    membership -> load `@ad` for the ACL-to-attack matrix
-6. **Then check flags**: `cat /root/root.txt` or read via SMB -- but only
-   AFTER steps 1-5. The flag is a byproduct of having the right access.
+6. **Then check flags**: read the hash and record it with `flag user <hash>`
+   or `flag root <hash>` -- but only AFTER steps 1-5. The flag is a byproduct
+   of having the right access.
 
 Record each finding: `note finding '<principal> -> <right> -> <attack>'`.
 

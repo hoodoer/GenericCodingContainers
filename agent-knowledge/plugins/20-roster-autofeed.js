@@ -44,7 +44,11 @@ const EMAIL_FREEMAIL = new Set(["gmail.com", "googlemail.com", "outlook.com",
   "hotmail.com", "live.com", "msn.com", "yahoo.com", "yahoo.co.uk", "aol.com",
   "icloud.com", "me.com", "mail.com", "gmx.com", "yandex.com", "protonmail.com",
   "proton.me", "example.com", "example.org", "example.net", "email.com",
-  "test.com", "domain.com", "company.com", "acme.com", "sentry.io", "github.com"]);
+  "test.com", "domain.com", "company.com", "acme.com", "sentry.io", "github.com",
+  // Technical domains from protocol banners/nmap output (not user namespaces)
+  "openssh.com", "libssh.org", "putty.org", "apache.org", "nginx.org",
+  "openssl.org", "ietf.org", "w3.org", "mozilla.org", "kernel.org",
+  "redhat.com", "debian.org", "ubuntu.com", "canonical.com"]);
 // Windows built-in group/principal name fragments that appear as email
 // local-parts when BloodHound dumps "DOMAIN ADMINS@CORP.HTB" style output.
 // Also covers AD container/OU names that leak from LDAP enumeration.

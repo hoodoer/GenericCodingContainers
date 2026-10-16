@@ -1431,6 +1431,15 @@ def main(argv):
         for u, lvl in sorted(valid.items()):
             print(f"  [+] {u:20} {proto} {'ADMIN' if lvl == 'admin' else 'valid'}")
         print(f"[+] {len(valid)} hit(s) recorded with note cred. Use them: each is new attack surface.")
+        admins = [u for u, lvl in valid.items() if lvl == "admin"]
+        if admins:
+            body = (f"Password spray via {proto} confirmed admin access on {target}. "
+                    f"Admin account(s): {', '.join(sorted(admins))}. "
+                    f"Secret: {'hash' if is_hash(secret) else 'password'} (see note cred). "
+                    f"Evidence: {log.removeprefix('/workspace/')}")
+            subprocess.run(["assess", f"Admin access via {proto} spray — {target}", body],
+                           capture_output=True, text=True)
+            print(f"[+] Auto-assessed: admin access via {proto} on {target}")
     else:
         print("  (no valid logins)")
     print(f"[*] {len(users)} accounts tested, {len(invalid)} invalid. Full log: {log.removeprefix('/workspace/')}")
@@ -1440,6 +1449,56 @@ def main(argv):
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))
 SPRAYEOF
+
+# --- Flag capture CLI. Records the flag, writes an assessment entry, and
+#     notes the access level on the state board — all mechanically, so the
+#     model only has to do one thing: `flag user <hash>` or `flag root <hash>`.
+cat << 'FLAGEOF' > /usr/local/bin/flag
+#!/usr/bin/env bash
+set -uo pipefail
+
+usage() {
+    echo "usage: flag <user|root> <hash>" >&2
+    echo "  Records the flag, adds an ASSESSMENT.md entry, and notes the access." >&2
+    exit 2
+}
+
+LEVEL="${1:-}"
+HASH="${2:-}"
+
+case "$LEVEL" in
+    user|root) ;;
+    -h|--help) usage ;;
+    *) echo "[-] level must be 'user' or 'root', not '$LEVEL'" >&2; usage ;;
+esac
+[ -z "$HASH" ] && { echo "[-] no flag hash given" >&2; usage; }
+
+TS=$(date '+%Y-%m-%d %H:%M:%S')
+FLAGFILE="/workspace/loot/flags.txt"
+mkdir -p /workspace/loot
+
+if grep -qF "$HASH" "$FLAGFILE" 2>/dev/null; then
+    echo "[*] flag already recorded: $HASH"
+else
+    printf '%s  %s  %s\n' "$TS" "$LEVEL" "$HASH" >> "$FLAGFILE"
+    echo "[+] flag saved to loot/flags.txt"
+fi
+
+# Auto-assess
+IDENTITY=$(whoami 2>/dev/null || echo "unknown")
+if [ "$LEVEL" = "root" ]; then
+    TITLE="Root flag captured"
+    BODY="Root-level access confirmed. Flag hash: ${HASH}. Captured at ${TS}. Evidence: loot/flags.txt"
+else
+    TITLE="User flag captured"
+    BODY="User-level access confirmed. Flag hash: ${HASH}. Captured at ${TS}. Evidence: loot/flags.txt"
+fi
+assess "$TITLE" "$BODY" 2>/dev/null && echo "[+] Auto-assessed: $TITLE"
+
+# Note the access on the state board
+note access "$LEVEL flag captured ($TS)" 2>/dev/null
+echo "[+] $LEVEL flag recorded. Keep going — $([ "$LEVEL" = "user" ] && echo "escalate to root" || echo "review ASSESSMENT.md for the write-up")."
+FLAGEOF
 
 # --- Stateless Metasploit wrapper
 cat << 'EOF' > /usr/local/bin/msf-run
@@ -1921,6 +1980,38 @@ cat << 'EOF' > /usr/local/bin/opencode-select
 #!/usr/bin/env bash
 HALOGEN_URL="${HALOGEN_URL:-http://host.containers.internal:8731/v1}"
 
+# --- Network isolation: only HTB VPN + Halogen host, no LAN access ---
+HALOGEN_HOST=$(echo "$HALOGEN_URL" | sed -E 's|https?://([^:/]+).*|\1|')
+HALOGEN_IP=$(getent hosts "$HALOGEN_HOST" 2>/dev/null | awk '{print $1; exit}')
+if command -v iptables >/dev/null 2>&1; then
+    echo "[*] Applying network isolation (block home LAN, allow HTB + internet)..."
+    iptables -F OUTPUT 2>/dev/null
+    # Allow loopback (SearXNG, PostgreSQL, etc.)
+    iptables -A OUTPUT -o lo -j ACCEPT
+    # Allow established/related
+    iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+    # Allow DNS to any destination (resolver may be on a private IP)
+    iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
+    iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
+    # Allow HTB VPN subnets (tun0: 10.10.0.0/16 attacker, 10.129.0.0/16 targets)
+    iptables -A OUTPUT -d 10.10.0.0/16 -j ACCEPT
+    iptables -A OUTPUT -d 10.129.0.0/16 -j ACCEPT
+    # Allow Halogen server on host
+    if [ -n "$HALOGEN_IP" ]; then
+        iptables -A OUTPUT -d "$HALOGEN_IP" -j ACCEPT
+    fi
+    # Block all RFC1918 private ranges (home LAN protection)
+    # Order matters: HTB VPN allows above take precedence
+    iptables -A OUTPUT -d 10.0.0.0/8 -j REJECT --reject-with icmp-net-unreachable
+    iptables -A OUTPUT -d 172.16.0.0/12 -j REJECT --reject-with icmp-net-unreachable
+    iptables -A OUTPUT -d 192.168.0.0/16 -j REJECT --reject-with icmp-net-unreachable
+    # Allow everything else (internet — SearXNG needs this for search engines)
+    iptables -A OUTPUT -j ACCEPT
+    echo "[+] Network: HTB VPN + internet allowed, private ranges blocked"
+else
+    echo "[!] iptables not found -- network isolation NOT applied"
+fi
+
 echo "[*] Starting PostgreSQL..."
 pg_ctlcluster "$(pg_lsclusters -h | awk '{print $1}' | head -n1)" main start 2>/dev/null \
   || service postgresql start 2>/dev/null || true
@@ -2135,7 +2226,7 @@ chmod +x /usr/local/bin/safe-run /usr/local/bin/scope_check \
          /usr/local/bin/run_guarded /usr/local/bin/msf-run \
          /usr/local/bin/note /usr/local/bin/assess /usr/local/bin/note-from-msf \
          /usr/local/bin/wiki /usr/local/bin/lesson /usr/local/bin/export-session \
-         /usr/local/bin/roster /usr/local/bin/spray \
+         /usr/local/bin/roster /usr/local/bin/spray /usr/local/bin/flag \
          /usr/local/bin/msf-mcp /usr/local/bin/opencode-select \
          /usr/local/bin/cleanup /usr/local/bin/websearch \
          /usr/local/bin/rdp-connect /usr/local/bin/rdp-screenshot \

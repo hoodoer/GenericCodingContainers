@@ -42,7 +42,6 @@ if [ $CLEAN -eq 1 ] && [ -z "$TARGET_DIR" ]; then
 fi
 [ -z "$TARGET_DIR" ] && TARGET_DIR=$(pwd)
 TARGET_DIR=$(readlink -f "$TARGET_DIR")
-ARCHIVE_ROOT=$(readlink -m "${HALOGEN_ARCHIVE_DIR:-$SCRIPT_DIR/archive}")
 MARKER=".halogen-workspace"   # written into /workspace by opencode-select on launch
 
 # True if path $1 is $2 or lies beneath it.
@@ -50,8 +49,8 @@ under() { local d="${2%/}"; case "$1/" in "$d"/*) return 0 ;; esac; return 1; }
 refuse() { echo "[-] Refusing to --clean $TARGET_DIR: $1"; exit 1; }
 
 if [ $CLEAN -eq 1 ]; then
-    # Never wipe this repo, a home dir, the archive, or anything containing them.
-    PROTECT=("$SCRIPT_DIR" "$HOME" "$ARCHIVE_ROOT")
+    # Never wipe this repo, a home dir, or anything containing them.
+    PROTECT=("$SCRIPT_DIR" "$HOME")
     if [ -n "${SUDO_USER:-}" ]; then
         PROTECT+=("$(getent passwd "$SUDO_USER" | cut -d: -f6 || true)")
     fi
@@ -60,27 +59,12 @@ if [ $CLEAN -eq 1 ]; then
         p=$(readlink -m "$p")
         if under "$p" "$TARGET_DIR"; then refuse "it is or contains $p"; fi
     done
-    if under "$TARGET_DIR" "$ARCHIVE_ROOT"; then refuse "it is inside the archive ($ARCHIVE_ROOT)"; fi
     if [ -e "$TARGET_DIR/.git" ]; then refuse "it is a git checkout"; fi
     if [ -n "$(ls -A "$TARGET_DIR" 2>/dev/null)" ] && [ ! -f "$TARGET_DIR/$MARKER" ]; then
         refuse "no $MARKER marker, so it doesn't look like a box workspace (the marker is written on launch)"
     fi
 
     echo "[*] --clean requested. Wiping state for a fresh challenge."
-
-    # Copy the review artifacts out first, so review needn't happen before the wipe.
-    ARCHIVE="$ARCHIVE_ROOT/$(date +%Y%m%d-%H%M%S)-$(basename "$TARGET_DIR")"
-    for f in ASSESSMENT.md lessonsLearned.md scope.txt notes wiki; do
-        [ -e "$TARGET_DIR/$f" ] || continue
-        [ -d "$ARCHIVE_ROOT" ] || install -d -m 700 "$ARCHIVE_ROOT"   # archives hold creds
-        mkdir -p "$ARCHIVE"
-        cp -a "$TARGET_DIR/$f" "$ARCHIVE/"
-    done
-    if [ -d "$ARCHIVE" ]; then
-        echo "[+] Archived review artifacts to $ARCHIVE"
-    else
-        echo "[*] No review artifacts to archive."
-    fi
 
     # Wipe workspace contents on the host side
     if [ -d "$TARGET_DIR" ]; then
