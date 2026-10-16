@@ -89,11 +89,13 @@ RUN apt-get remove -y python3-minikerberos 2>/dev/null || true \
     && pip3 cache purge
 
 # --- SearXNG (local metasearch engine — no CAPTCHA / bot-blocking)
-#     Isolated venv so its large dependency tree can't conflict with mcp[cli].
-RUN python3 -m venv /opt/searxng-venv \
-    && /opt/searxng-venv/bin/pip install --no-cache-dir searxng \
+#     Cloned from source because pip install fails (setup.py eagerly imports the app).
+#     Deps go in a venv so they can't conflict with system packages (e.g. mcp 1.x).
+RUN git clone --depth 1 https://github.com/searxng/searxng.git /opt/searxng \
+    && python3 -m venv /opt/searxng-venv \
+    && /opt/searxng-venv/bin/pip install --no-cache-dir -r /opt/searxng/requirements.txt \
     && mkdir -p /etc/searxng \
-    && echo "[+] SearXNG installed (venv: /opt/searxng-venv)"
+    && echo "[+] SearXNG installed (source: /opt/searxng, venv: /opt/searxng-venv)"
 
 RUN git clone --depth 1 https://github.com/dirkjanm/PKINITtools.git /opt/PKINITtools \
     && ln -sf /opt/PKINITtools/gettgtpkinit.py /usr/local/bin/gettgtpkinit.py \

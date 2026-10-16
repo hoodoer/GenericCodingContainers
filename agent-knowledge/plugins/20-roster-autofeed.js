@@ -65,7 +65,13 @@ const BUILTIN_NAMES = new Set([
   "contractors", "external", "internal", "vendors",
 ]);
 
+// Git/patch output contains author names that look like usernames but aren't
+// box accounts. Reject text whose surrounding context smells like a commit log,
+// patch header, or changelog.
+const GIT_CONTEXT = /(?:^commit [0-9a-f]{40}|^Author:|^From:|^Signed-off-by:|^Reviewed-by:|^Acked-by:|^Tested-by:|^Reported-by:|^Cc:)/m;
+
 function usersFromText(text) {
+  if (GIT_CONTEXT.test(text)) return new Set();
   const out = new Set();
   for (const m of text.matchAll(SID_USER)) {
     const n = m[1];
@@ -104,6 +110,13 @@ export const RosterAutofeedPlugin = async ({ directory } = {}) => {
 
       const sid = input.sessionID || "default";
       const found = usersFromText(text);
+
+      // If the output looks like git/patch output, skip email extraction too —
+      // author emails are not box accounts.
+      if (GIT_CONTEXT.test(text)) {
+        if (!found.size) return;
+        // fall through with whatever SID/passwd found (unlikely but safe)
+      }
 
       // Emails: accumulate per session; feed a domain's local-parts once it has
       // shown >=2 distinct addresses (one stray address stays out of the roster).

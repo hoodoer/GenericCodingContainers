@@ -59,8 +59,15 @@ export const FootholdTriggerPlugin = async ({ directory } = {}) => {
                  : typeof output?.metadata?.output === "string" ? output.metadata.output : "";
       if (!text) return;
 
+      // Reject false positives: if the command is reading files, browsing docs,
+      // or searching (cat/less/head/grep/curl/websearch/searchsploit), the
+      // signal is in static text, not a live shell.
+      const cmd = typeof input?.args?.command === "string" ? input.args.command : "";
+      const isRead = /^\s*(?:cat|head|tail|less|more|grep|strings|file|xxd|curl|wget|websearch|searchsploit|man|apt|dpkg)\b/.test(cmd);
+
       const hitIdx = SIGNALS.findIndex((s) => s.re.test(text));
       if (hitIdx === -1) return;
+      if (isRead) return;   // signal appeared in static output, not a live shell
       const sig = SIGNALS[hitIdx];
 
       if (sig.once) {

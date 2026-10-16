@@ -1742,7 +1742,7 @@ server:
   public_instance: false
 search:
   safe_search: 0
-  autocomplete: false
+  autocomplete: ""
   default_lang: "en"
   formats:
     - html
@@ -1931,7 +1931,7 @@ if ! pg_isready -q; then
 fi
 
 echo "[*] Starting SearXNG (local search engine on :8888)..."
-SEARXNG_SETTINGS_PATH=/etc/searxng/settings.yml \
+SEARXNG_SETTINGS_PATH=/etc/searxng/settings.yml PYTHONPATH=/opt/searxng \
   nohup /opt/searxng-venv/bin/python3 -m searx.webapp > /tmp/searxng.log 2>&1 &
 echo $! > /tmp/searxng.pid
 sleep 2
@@ -2016,7 +2016,10 @@ echo "$RESPONSE" | jq --arg sel "$SELECTED_MODEL" --arg base "$HALOGEN_URL" '{
       "options": {
         "baseURL": $base,
         "apiKey": "halogen",
-        "temperature": 0.2,
+        "temperature": 1.0,
+        "topP": 0.95,
+        "topK": 20,
+        "frequencyPenalty": 0.3,
         "timeout": 600000,
         "headerTimeout": 60000,
         "chunkTimeout": 300000

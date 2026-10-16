@@ -28,9 +28,13 @@ export const ToolTrackerPlugin = async ({ directory } = {}) => {
       if (!cmd) return;
 
       for (const prefix of WATCH_PATHS) {
+        const esc = prefix.replace(/\//g, "\\/");
         const patterns = [
-          new RegExp(`(?:cat|tee|cp|mv|sed|echo|printf|python3?|>|>>)\\s+.*${prefix.replace(/\//g, "\\/")}`, "i"),
-          new RegExp(`>\\s*${prefix.replace(/\//g, "\\/")}`, "i"),
+          new RegExp(`(?:tee|cp|mv|install)\\s+.*${esc}`, "i"),
+          new RegExp(`(?:sed|patch)\\s+-i.*${esc}`, "i"),
+          new RegExp(`>\\s*${esc}`, "i"),
+          new RegExp(`(?:echo|printf|cat\\s*<<).*>\\s*${esc}`, "i"),
+          new RegExp(`chmod\\s+.*${esc}`, "i"),
         ];
         for (const pat of patterns) {
           if (!pat.test(cmd)) continue;

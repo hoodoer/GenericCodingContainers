@@ -83,18 +83,48 @@ export const CheckpointPlugin = async ({ client, directory } = {}) => {
         state = state.slice(0, MAX_STATE) + "\n...(truncated; the full board is notes/STATE.md)";
       }
       output.context.push(checkpoint(state));
-      const nextCount = (state.match(/^- (?!STUCK:)/gm) || []).length;
       const nextSection = state.split(/^## Next$/m)[1] || "";
       const nextItems = (nextSection.split(/^## /m)[0].match(/^- /gm) || []).length;
+      const sectionHasBullet = (heading) => {
+        const re = new RegExp(`^## ${heading}[^\\n]*\\n([\\s\\S]*?)(?=^## |$)`, "m");
+        const body = (state.match(re) || [])[1] || "";
+        return /^- /m.test(body);
+      };
+      const hasCreds = sectionHasBullet("Credentials");
+      const hasAccess = sectionHasBullet("Access");
       let extra = "";
       if (nextItems > 5) {
-        extra = ` | ⚠ ${nextItems} items in Next — prune stale leads (note rm next '<done>')`;
+        extra = ` | ⚠ ${nextItems} items in Next — prune stale leads`;
         output.context.push(
           `The Next section has ${nextItems} items. Before adding more leads, prune entries ` +
           "that are done, wrong, or superseded. Stale leads waste your attention after compaction."
         );
       }
+      if (!hasCreds && !hasAccess) {
+        extra += " | ⚠ NO FOOTHOLD YET";
+        output.context.push(
+          "⚠ NO FOOTHOLD: you have zero credentials and zero access entries. " +
+          "Before continuing your current approach, check: have you FULLY enumerated " +
+          "every web application? (whatweb, nikto, ffuf directory brute, CMS-specific scans) " +
+          "Have you searched every service version for CVEs? (searchsploit, websearch) " +
+          "On easy/medium boxes, the foothold is almost always in the web app. " +
+          "If you are writing custom protocol scripts, you have likely skipped a simpler path."
+        );
+      }
       const n = (read(runLog).match(/ compaction #\d+:/g) || []).length + 1;
+      if (n >= 3) {
+        const wikiIdx = read(`${root}/wiki/INDEX.md`);
+        if (/no pages yet/i.test(wikiIdx) || !wikiIdx.trim()) {
+          extra += " | ⚠ wiki empty";
+          output.context.push(
+            "⚠ WIKI EMPTY after multiple compactions. You are losing detail on every compaction. " +
+            "Move per-host and per-service depth to the wiki NOW: " +
+            "`wiki add hosts/<ip> '<enumeration detail>'`, " +
+            "`wiki add web/<app> '<findings>'`. " +
+            "STATE.md is the short board — wiki pages survive compaction intact."
+          );
+        }
+      }
       run(`compaction #${n}: STATE.md injected (${state.length} bytes)${extra}`);
     },
 

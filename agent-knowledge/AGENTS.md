@@ -59,14 +59,27 @@ with the access and tools you already have.
    without progress, stop pushing THAT sub-problem -- not the box. Leave a
    breadcrumb (`note stuck '<what, tried, why>'`), then move to a different lead:
    another identity, another service, or research the exact error symptom.
-6. **Never re-run a command you've already run.** You already have its output,
+6. **Writing custom exploit code = you skipped something.** If you are writing
+   a custom protocol script or binary exploit, you have almost certainly missed
+   a simpler path. STOP and check: did you fully enumerate the web app (ffuf,
+   nikto, whatweb, CMS-specific scans)? Did you search every service version
+   for CVEs? On easy/medium boxes, the foothold uses existing tools and known
+   techniques -- not custom exploit code. Go back to Phase 1 step 1.
+7. **Kernel exploits = last resort.** If you are compiling a kernel exploit,
+   you have almost certainly skipped a simpler user-space privesc. STOP and
+   check: did you run `sudo -l`? Check SUID binaries? Check installed
+   package versions for known CVEs (`dpkg -l`, `rpm -qa`)? Check polkit,
+   packagekit, snapd, pkexec? On easy/medium boxes, privesc is a
+   misconfigured service or a vulnerable user-space package — not a kernel
+   bug. Exhaust Phase 3 step 4a-e before touching 4f.
+8. **Never re-run a command you've already run.** You already have its output,
    whether it succeeded or failed -- running it again tells you nothing new. If
    the result didn't move you forward, change the method, tool, or inputs, or
    move to a different lead. Re-running the same command IS a loop.
-7. **A reboot is a legitimate tool.** Lab VMs revert to a snapshot on reboot.
+8. **A reboot is a legitimate tool.** Lab VMs revert to a snapshot on reboot.
    When an interactive channel is deadlocked and you cannot restart its
    service, rebooting is faster than fighting it.
-8. **Keep the state board current.** See *Working state* below.
+9. **Keep the state board current.** See *Working state* below.
 
 ## Working state -- `notes/STATE.md`
 - Read `notes/STATE.md` (`note show`) at the start, FIRST after any
@@ -124,6 +137,15 @@ safe-run nmap -sCV -Pn -oA /workspace/loot/initial <TARGET>
 Record every service name and version number (e.g. `Apache 2.4.49`,
 `OpenSSH 8.2p1`, `ProFTPD 1.3.5`).
 
+**Attack surface priority (work top to bottom):**
+1. **Web apps** (HTTP/HTTPS ports) — load `web-recon` skill, run whatweb/nikto,
+   directory-brute with ffuf, check for known CMS vulns. On easy/medium boxes
+   the foothold is almost always here. DO NOT move to step 3 until you have
+   thoroughly enumerated every web app.
+2. **Known CVEs** in identified service versions — searchsploit + websearch for
+   every `<service> <version>` pair.
+3. **Non-standard / unusual services** — only AFTER steps 1-2 are exhausted.
+
 ### Phase 2: Search for exploits LOCALLY FIRST
 For every service+version, search local databases before the web:
 ```bash
@@ -150,8 +172,13 @@ Run this for EVERY new credential, shell, token, or file access:
 3. **What can this identity reach?** `spray <host> '<secret>'` the whole roster,
    then `nxc smb <T> -u <U> -p <P> --shares` and LIST every readable share.
    Check: does this identity get `Pwn3d!` on any target the previous didn't?
-4. **Local privesc paths**: SUID/sudo/capabilities, service misconfigs, cron,
-   scheduled tasks, writable service binaries, kernel exploits
+4. **Local privesc paths (work top to bottom — user-space first):**
+   a. `sudo -l` / `sudo -n -l` — sudoers entries
+   b. SUID/SGID binaries — `find / -perm -4000 2>/dev/null`
+   c. Capabilities — `getcap -r / 2>/dev/null`
+   d. **Installed packages with known CVEs** — `dpkg -l | grep -iE 'packagekit|polkit|pkexec|snap|flatpak|docker|screen|exim'` and `websearch '<package> <version> CVE'`
+   e. Cron/timers, writable service binaries, PATH hijack
+   f. Kernel exploits — LAST resort, only after a-e are exhausted
 5. **AD rights** (if domain-joined): ACLs on other objects, delegation, group
    membership -> load `@ad` for the ACL-to-attack matrix
 6. **Then check flags**: `cat /root/root.txt` or read via SMB -- but only
