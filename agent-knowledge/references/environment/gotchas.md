@@ -77,6 +77,28 @@ Forwarded ports: **80, 443, 445, 4444-4460, 8080-8090**.
 while true; do nc -lvnp 4444 | tee -a /workspace/loot/rs.log; sleep 1; done
 ```
 
+## Headless browser
+Chromium is pre-installed at `/usr/bin/chromium`. For puppeteer/playwright,
+point to it instead of downloading a bundled browser:
+```js
+const browser = await puppeteer.launch({
+  executablePath: '/usr/bin/chromium',
+  args: ['--no-sandbox', '--disable-gpu']
+});
+```
+Do NOT run `npx puppeteer browsers install` or `apt-get install chromium` --
+they waste time and bandwidth. The system Chromium already has all required
+shared libraries.
+
+## supervisord / process managers
+If a managed process (gunicorn, uwsgi, celery) crashes on boot in <1s,
+supervisord marks it FATAL and stops retrying — the app stays permanently
+down with no self-heal, even though the container/supervisor is alive.
+There is no reset API or auto-recovery; only an external VM revert fixes it.
+**Test exploit payloads locally before uploading to the target.** If you
+brick the app, set up a watchdog (`while curl fails; sleep 20; done`) and
+wait for a revert rather than wasting cycles on a dead port.
+
 ## UNC vs local path
 A shell spawned by an agent may not authenticate to `\\dc\share` ("Access
 denied") but CAN read the same folder via its local path (`C:\Shares\...`).

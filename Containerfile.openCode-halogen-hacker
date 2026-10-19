@@ -47,7 +47,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       evil-winrm \
     && rm -rf /var/lib/apt/lists/*
 
-# --- RDP / GUI automation layer.
+# --- RDP / GUI automation layer + headless browser.
 #     xfreerdp    – headless RDP client
 #     Xvfb        – virtual framebuffer so xfreerdp has a DISPLAY
 #     xdotool     – keystroke / mouse injection
@@ -55,12 +55,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 #     scrot       – screenshot capture
 #     tesseract   – OCR for reading RDP screen content
 #     x11-utils   – xdpyinfo, etc. for display introspection
+#     chromium    – headless browser for web challenges (XSS bot replicas, CSP testing)
 RUN apt-get update && apt-get install -y --no-install-recommends \
       freerdp3-x11 \
       xvfb x11-utils x11-xserver-utils \
       xdotool wmctrl scrot \
       tesseract-ocr tesseract-ocr-eng \
       imagemagick \
+      chromium \
     && rm -rf /var/lib/apt/lists/*
 
 # --- OCR-B font (used by MRZ / passport-style puzzles)

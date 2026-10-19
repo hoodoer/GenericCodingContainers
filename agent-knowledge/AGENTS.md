@@ -59,12 +59,15 @@ with the access and tools you already have.
    without progress, stop pushing THAT sub-problem -- not the box. Leave a
    breadcrumb (`note stuck '<what, tried, why>'`), then move to a different lead:
    another identity, another service, or research the exact error symptom.
-6. **Writing custom exploit code = you skipped something.** If you are writing
-   a custom protocol script or binary exploit, you have almost certainly missed
-   a simpler path. STOP and check: did you fully enumerate the web app (ffuf,
-   nikto, whatweb, CMS-specific scans)? Did you search every service version
-   for CVEs? On easy/medium boxes, the foothold uses existing tools and known
-   techniques -- not custom exploit code. Go back to Phase 1 step 1.
+6. **Writing custom exploit code = you skipped something — UNLESS it's a web
+   exploit chain.** XSS payloads, SSTI chains, deserialization gadgets, and
+   bot-interaction scripts (CSP bypasses, CSRF, SSRF callbacks) are EXPECTED
+   custom code — write them in `/workspace/tools/` freely. But if you are
+   writing a custom protocol client, network exploit, or binary exploit, you
+   have almost certainly missed a simpler path. STOP and check: did you fully
+   enumerate the web app (ffuf, nikto, whatweb, CMS-specific scans)? Did you
+   search every service version for CVEs? On easy/medium boxes, the foothold
+   uses existing tools and known techniques. Go back to Phase 1 step 1.
 7. **Kernel exploits = last resort.** If you are compiling a kernel exploit,
    you have almost certainly skipped a simpler user-space privesc. STOP and
    check: did you run `sudo -l`? Check SUID binaries? Check installed

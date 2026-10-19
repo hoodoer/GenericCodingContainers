@@ -71,6 +71,12 @@ export const FootholdTriggerPlugin = async ({ directory } = {}) => {
       const cmd = typeof input?.args?.command === "string" ? input.args.command : "";
       const isRead = /^\s*(?:cat|head|tail|less|more|grep|strings|file|xxd|curl|wget|websearch|searchsploit|man|apt|dpkg)\b/.test(cmd);
 
+      // Skip local simulation/testing: commands targeting localhost, /tmp, or
+      // local venvs are not real footholds (avoids false positives from local
+      // exploit dev like compiling/testing .so shims).
+      const isLocal = /^\s*(?:cd\s+\/tmp|python3?\s.*\/tmp|gcc|make|\.\/|\/tmp\/)\b/.test(cmd)
+                    || /\b(?:127\.0\.0\.1|localhost|0\.0\.0\.0)\b/.test(cmd);
+
       // Check standard signals first, then SSH login as a separate path.
       let hitIdx = SIGNALS.findIndex((s) => s.re.test(text));
       let isSsh = false;
@@ -81,7 +87,7 @@ export const FootholdTriggerPlugin = async ({ directory } = {}) => {
           return;
         }
       }
-      if (isRead && !isSsh) return;   // signal appeared in static output, not a live shell
+      if ((isRead || isLocal) && !isSsh) return;   // signal in static output or local simulation
 
       if (!isSsh) {
         const sig = SIGNALS[hitIdx];

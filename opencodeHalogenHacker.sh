@@ -29,7 +29,7 @@ fi
 if [ $REBUILD -eq 1 ]; then
     echo "[*] Explicit rebuild requested."
     echo "[*] Building $IMAGE_NAME from $CONTAINERFILE..."
-    podman build --no-cache -t "$IMAGE_NAME" -f "$CONTAINERFILE" "$SCRIPT_DIR" 2>&1 | tee build.log
+    podman build -t "$IMAGE_NAME" -f "$CONTAINERFILE" "$SCRIPT_DIR" 2>&1 | tee build.log
     echo "[+] Image $IMAGE_NAME built. Exiting without launching."
     exit 0
 fi
