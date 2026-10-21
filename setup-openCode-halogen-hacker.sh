@@ -110,7 +110,7 @@ cat << 'NOTEEOF' > /usr/local/bin/note
       admin : it's$ecret
       EOF
 
-sections: scope access cred service finding parked next stuck
+sections: scope campaign access pivot cred service finding parked next stuck
   stuck = record a blocker (goes under parked, and into notes/STUCK.md for human review)
 """
 import datetime
@@ -130,7 +130,9 @@ VERBOSE = {"finding", "parked", "service"}
 
 HEADERS = {
     "scope": "## Scope",
+    "campaign": "## Campaign",
     "access": "## Access",
+    "pivot": "## Pivots",
     "cred": "## Credentials",
     "service": "## Services",
     "finding": "## Findings",
@@ -141,6 +143,8 @@ HEADERS = {
 ALIASES = {
     "creds": "cred", "credential": "cred", "credentials": "cred",
     "services": "service", "findings": "finding",
+    "pivots": "pivot", "tunnel": "pivot", "tunnels": "pivot",
+    "network": "campaign", "hosts": "campaign", "map": "campaign",
     "fail": "parked", "failed": "parked", "tried": "parked", "todo": "next", "stuck": "stuck",
 }
 
@@ -1458,18 +1462,27 @@ cat << 'FLAGEOF' > /usr/local/bin/flag
 set -uo pipefail
 
 usage() {
-    echo "usage: flag <user|root> <hash>" >&2
-    echo "  Records the flag, adds an ASSESSMENT.md entry, and notes the access." >&2
+    cat >&2 <<'USAGE'
+usage: flag <label> <hash>
+
+  Records a flag, adds an ASSESSMENT.md entry, and notes the capture.
+
+  <label> is any descriptive tag: a hostname, a challenge name, user/root, etc.
+  Examples:
+    flag user <hash>              # single-box user flag
+    flag root <hash>              # single-box root flag
+    flag DC01 <hash>              # Pro Lab: flag from DC01
+    flag "YOURFLAG01" <hash>      # Pro Lab: named flag
+    flag web01-user <hash>        # network: user-level flag on web01
+USAGE
     exit 2
 }
 
-LEVEL="${1:-}"
+LABEL="${1:-}"
 HASH="${2:-}"
 
-case "$LEVEL" in
-    user|root) ;;
-    -h|--help) usage ;;
-    *) echo "[-] level must be 'user' or 'root', not '$LEVEL'" >&2; usage ;;
+case "$LABEL" in
+    -h|--help|"") usage ;;
 esac
 [ -z "$HASH" ] && { echo "[-] no flag hash given" >&2; usage; }
 
@@ -1480,24 +1493,21 @@ mkdir -p /workspace/loot
 if grep -qF "$HASH" "$FLAGFILE" 2>/dev/null; then
     echo "[*] flag already recorded: $HASH"
 else
-    printf '%s  %s  %s\n' "$TS" "$LEVEL" "$HASH" >> "$FLAGFILE"
+    printf '%s  %-20s  %s\n' "$TS" "$LABEL" "$HASH" >> "$FLAGFILE"
     echo "[+] flag saved to loot/flags.txt"
 fi
 
+# Count progress
+TOTAL=$(wc -l < "$FLAGFILE" 2>/dev/null || echo 0)
+
 # Auto-assess
-IDENTITY=$(whoami 2>/dev/null || echo "unknown")
-if [ "$LEVEL" = "root" ]; then
-    TITLE="Root flag captured"
-    BODY="Root-level access confirmed. Flag hash: ${HASH}. Captured at ${TS}. Evidence: loot/flags.txt"
-else
-    TITLE="User flag captured"
-    BODY="User-level access confirmed. Flag hash: ${HASH}. Captured at ${TS}. Evidence: loot/flags.txt"
-fi
+TITLE="Flag captured: $LABEL"
+BODY="Flag '${LABEL}' captured. Hash: ${HASH}. Captured at ${TS}. Total flags: ${TOTAL}. Evidence: loot/flags.txt"
 assess "$TITLE" "$BODY" 2>/dev/null && echo "[+] Auto-assessed: $TITLE"
 
 # Note the access on the state board
-note access "$LEVEL flag captured ($TS)" 2>/dev/null
-echo "[+] $LEVEL flag recorded. Keep going — $([ "$LEVEL" = "user" ] && echo "escalate to root" || echo "review ASSESSMENT.md for the write-up")."
+note access "$LABEL flag captured ($TS)" 2>/dev/null
+echo "[+] Flag '$LABEL' recorded ($TOTAL total). Keep hunting — each compromised host opens new attack surface."
 FLAGEOF
 
 # --- Stateless Metasploit wrapper
@@ -1610,13 +1620,17 @@ YLW='\033[1;33m'
 RST='\033[0m'
 
 FORCE=0
+SOFT=0
 for arg in "$@"; do
     case "$arg" in
         -f|--force) FORCE=1 ;;
+        --soft) SOFT=1 ;;
         -h|--help)
-            echo "Usage: cleanup [-f|--force]"
+            echo "Usage: cleanup [-f|--force] [--soft]"
             echo "  Wipes /workspace contents and resets the Metasploit database."
-            echo "  -f  Skip confirmation prompt."
+            echo "  -f     Skip confirmation prompt."
+            echo "  --soft Reset MSF DB and sessions but KEEP loot, wiki, notes,"
+            echo "         and ASSESSMENT.md. Use between phases of a network engagement."
             exit 0
             ;;
     esac
@@ -1624,10 +1638,13 @@ done
 
 if [ "$FORCE" -ne 1 ]; then
     echo -e "${YLW}[!] This will DESTROY:${RST}"
-    echo "      - All files under /workspace  (loot, logs, AGENTS.md, scope.txt, ...)"
+    echo "      - All files under /workspace  (loot, logs, wiki, notes, scope.txt, ...)"
     echo "      - The entire Metasploit database  (hosts, services, creds, loot)"
     echo ""
-    read -p "    Type 'yes' to confirm: " CONFIRM
+    echo "    For a network engagement, consider 'cleanup --soft' to reset the"
+    echo "    MSF DB and session state while keeping loot/wiki/notes for review."
+    echo ""
+    read -p "    Type 'yes' to confirm FULL cleanup: " CONFIRM
     if [ "$CONFIRM" != "yes" ]; then
         echo "[-] Aborted."
         exit 1
@@ -1661,19 +1678,30 @@ else
     fi
 fi
 
-# --- 2. Wipe workspace ---
-echo -e "${YLW}[*] Cleaning /workspace...${RST}"
-# Remove everything except hidden mount metadata
-find /workspace -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
-echo -e "${GRN}[+] /workspace wiped.${RST}"
+if [ "$SOFT" -eq 1 ]; then
+    # --- Soft cleanup: keep engagement data, reset sessions ---
+    echo -e "${YLW}[*] Soft cleanup: keeping loot, wiki, notes, ASSESSMENT.md...${RST}"
+    echo -e "${YLW}[*] Clearing OpenCode sessions...${RST}"
+    rm -rf "$HOME/.local/share/opencode" /workspace/.opencode 2>/dev/null || true
+    echo -e "${GRN}[+] Sessions cleared.${RST}"
+    echo ""
+    echo -e "${GRN}[+] Soft cleanup complete. MSF DB reset, sessions cleared.${RST}"
+    echo -e "${GRN}    Engagement data preserved: loot/, wiki/, notes/, ASSESSMENT.md${RST}"
+else
+    # --- 2. Wipe workspace ---
+    echo -e "${YLW}[*] Cleaning /workspace...${RST}"
+    # Remove everything except hidden mount metadata
+    find /workspace -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
+    echo -e "${GRN}[+] /workspace wiped.${RST}"
 
-# --- 3. Clear OpenCode session state ---
-echo -e "${YLW}[*] Clearing OpenCode sessions...${RST}"
-rm -rf "$HOME/.local/share/opencode" /workspace/.opencode 2>/dev/null || true
-echo -e "${GRN}[+] Sessions cleared.${RST}"
+    # --- 3. Clear OpenCode session state ---
+    echo -e "${YLW}[*] Clearing OpenCode sessions...${RST}"
+    rm -rf "$HOME/.local/share/opencode" /workspace/.opencode 2>/dev/null || true
+    echo -e "${GRN}[+] Sessions cleared.${RST}"
 
-echo ""
-echo -e "${GRN}[+] Cleanup complete. Ready for the next challenge.${RST}"
+    echo ""
+    echo -e "${GRN}[+] Cleanup complete. Ready for the next engagement.${RST}"
+fi
 CLEANEOF
 
 # =======================================================================
@@ -1980,11 +2008,14 @@ cat << 'EOF' > /usr/local/bin/opencode-select
 #!/usr/bin/env bash
 HALOGEN_URL="${HALOGEN_URL:-http://host.containers.internal:8731/v1}"
 
-# --- Network isolation: only HTB VPN + Halogen host, no LAN access ---
+# --- Network isolation: only lab VPN + Halogen host, no LAN access ---
+# LAB_SUBNETS: comma-separated CIDR ranges to allow (override for Pro Labs).
+# Defaults cover standard HTB VPN subnets; Pro Labs may use different ranges.
+LAB_SUBNETS="${LAB_SUBNETS:-10.10.0.0/16,10.129.0.0/16}"
 HALOGEN_HOST=$(echo "$HALOGEN_URL" | sed -E 's|https?://([^:/]+).*|\1|')
 HALOGEN_IP=$(getent hosts "$HALOGEN_HOST" 2>/dev/null | awk '{print $1; exit}')
 if command -v iptables >/dev/null 2>&1; then
-    echo "[*] Applying network isolation (block home LAN, allow HTB + internet)..."
+    echo "[*] Applying network isolation (block home LAN, allow lab + internet)..."
     iptables -F OUTPUT 2>/dev/null
     # Allow loopback (SearXNG, PostgreSQL, etc.)
     iptables -A OUTPUT -o lo -j ACCEPT
@@ -1993,21 +2024,24 @@ if command -v iptables >/dev/null 2>&1; then
     # Allow DNS to any destination (resolver may be on a private IP)
     iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
     iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
-    # Allow HTB VPN subnets (tun0: 10.10.0.0/16 attacker, 10.129.0.0/16 targets)
-    iptables -A OUTPUT -d 10.10.0.0/16 -j ACCEPT
-    iptables -A OUTPUT -d 10.129.0.0/16 -j ACCEPT
+    # Allow lab VPN subnets (configurable via LAB_SUBNETS env var)
+    IFS=',' read -ra _SUBNETS <<< "$LAB_SUBNETS"
+    for _sub in "${_SUBNETS[@]}"; do
+        _sub=$(echo "$_sub" | xargs)  # trim whitespace
+        [ -n "$_sub" ] && iptables -A OUTPUT -d "$_sub" -j ACCEPT
+    done
     # Allow Halogen server on host
     if [ -n "$HALOGEN_IP" ]; then
         iptables -A OUTPUT -d "$HALOGEN_IP" -j ACCEPT
     fi
     # Block all RFC1918 private ranges (home LAN protection)
-    # Order matters: HTB VPN allows above take precedence
+    # Order matters: lab VPN allows above take precedence
     iptables -A OUTPUT -d 10.0.0.0/8 -j REJECT --reject-with icmp-net-unreachable
     iptables -A OUTPUT -d 172.16.0.0/12 -j REJECT --reject-with icmp-net-unreachable
     iptables -A OUTPUT -d 192.168.0.0/16 -j REJECT --reject-with icmp-net-unreachable
     # Allow everything else (internet — SearXNG needs this for search engines)
     iptables -A OUTPUT -j ACCEPT
-    echo "[+] Network: HTB VPN + internet allowed, private ranges blocked"
+    echo "[+] Network: lab subnets ($LAB_SUBNETS) + internet allowed, private ranges blocked"
 else
     echo "[!] iptables not found -- network isolation NOT applied"
 fi

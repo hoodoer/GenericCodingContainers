@@ -108,6 +108,7 @@ exec podman run -it --rm \
     -p 8080-8090:8080-8090 \
     -w /workspace \
     -e HALOGEN_URL="$HALOGEN_URL" \
+    ${LAB_SUBNETS:+-e LAB_SUBNETS="$LAB_SUBNETS"} \
     -v "$TARGET_DIR:/workspace:Z" \
     -v "$PG_VOLUME:/var/lib/postgresql:Z" \
     "$IMAGE_NAME" /usr/local/bin/opencode-select

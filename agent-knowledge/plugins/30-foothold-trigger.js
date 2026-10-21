@@ -30,10 +30,13 @@ const SSH_SUCCESS = /(?:Last login:|Welcome to|Linux \S+ \d+\.\d+|Ubuntu|Debian|
 const SSH_FAIL = /(?:Permission denied|Connection refused|Connection closed|No route to host|Could not resolve|Host key verification failed)/i;
 
 const REMINDER =
-  "\n\n⚡ NEW FOOTHOLD — run the post-foothold sweep (Phase 3) BEFORE " +
-  "hunting flags. Checklist: (1) whoami/id/privs (2) credential material " +
-  "on this host (3) spray the roster (4) privesc paths (5) AD rights. " +
-  "Flags are LAST — step 6.";
+  "\n\n⚡ NEW FOOTHOLD — run the post-foothold sweep BEFORE hunting flags. " +
+  "Checklist: (1) whoami/id/privs (2) credential material on this host " +
+  "(3) spray the roster across ALL known hosts (4) privesc paths (5) AD rights " +
+  "(6) what NEW hosts/segments can I reach from here? (arp -a, netstat, " +
+  "route/ip route, internal DNS, ping sweep). Each compromised host is a " +
+  "pivot point — update `note campaign` and `note pivot` with what this " +
+  "unlocks. Flags are LAST.";
 
 const COOLDOWN = 5;  // skip N bash calls after an "every" trigger before re-arming
 

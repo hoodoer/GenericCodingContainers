@@ -1,17 +1,18 @@
 # Pentesting Agent Instructions
 
 ## Operating mode -- autonomous (read this first)
-You solve the box on your own, from first scan to the flag. No one will answer
-mid-box: there is no hint coming and no approval to wait for. The box IS solvable
-with the access and tools you already have.
+You complete the engagement on your own, from first scan to every flag. No one
+will answer mid-engagement: there is no hint coming and no approval to wait for.
+The target IS solvable with the access and tools you already have -- whether it
+is a single box or an entire AD network.
 - **Never stop to ask the operator** for guidance, direction, or confirmation,
   and never end your turn with a question to the human. That is a wasted turn --
-  spend it on the box. If you're unsure what to do, take the most promising
+  spend it on the target. If you're unsure what to do, take the most promising
   untried lead and do it.
 - **"Stuck" never means "hand off."** It means: drop THIS approach and pick a
-  DIFFERENT lead -- another identity (`roster`/`spray`), another service, another
-  attack class. `note stuck` is a breadcrumb you leave yourself, not a request
-  for help, and not a reason to pause.
+  DIFFERENT lead -- another identity (`roster`/`spray`), another host, another
+  service, another attack class. `note stuck` is a breadcrumb you leave yourself,
+  not a request for help, and not a reason to pause.
 - **Before declaring any attack surface dead, review your parked paths.** Run
   `note show`, read the "Parked paths" section, and for EACH entry: load the
   `@reference` for that topic (`@adcs`, `@ad`, `@linux`, etc.) and check whether
@@ -19,12 +20,13 @@ with the access and tools you already have.
   because one technique failed may have three others you never tried. Ask:
   "did I check all capabilities of this identity against this surface, or only
   the obvious ones?"
-- **Each foothold's job is finding the NEXT identity or privilege.** Flags come
-  from reaching the right account -- hunt credentials, not flag files. Before
-  you believe you're out of options, run `roster show` and re-read
-  `notes/STATE.md`: there is almost always an untested identity, an unread
-  share, or an unexamined service left. "I'm not sure how to proceed" is a
-  prompt to enumerate more, not to stop.
+- **Each foothold's job is finding the NEXT identity, host, or privilege.**
+  Flags come from reaching the right account on the right host -- hunt
+  credentials and pivots, not flag files. Before you believe you're out of
+  options, run `roster show` and re-read `notes/STATE.md`: there is almost
+  always an untested identity, an unreachable segment, an unread share, or an
+  unexamined service left. "I'm not sure how to proceed" is a prompt to
+  enumerate more, not to stop.
 
 ## Golden Rules
 
@@ -42,11 +44,12 @@ with the access and tools you already have.
      NOT tested yet. `note-from-msf` feeds the roster automatically.
    - The moment you get ANY password or hash, test it against the WHOLE roster
      in one shot: `spray <dc-or-host> '<secret>'` (also `spray <host> <hash>`).
+     On a network, spray against EVERY reachable host, not just one.
      It records valid logins and marks who's been tested.
    - A valid hit is a new identity: `note cred` it (spray does this for you) and
      enumerate what IT can reach -- shares, WinRM, ACLs -- before moving on.
-   Before you conclude a box is stuck, run `roster show`: untested identities
-   left means you have unexplored attack surface.
+   Before you conclude an engagement is stuck, run `roster show`: untested
+   identities left means you have unexplored attack surface.
 3. **Enumerate capabilities, not just existence.** For every owned principal,
    ask "what does this let me DO?" and map it to an attack primitive.
    "I can write an attribute" is not a finding; "GenericWrite on a user ->
@@ -56,9 +59,10 @@ with the access and tools you already have.
    reason to re-run the same command. Search the exact error string.
 5. **Timebox every dead-end -- then switch, don't quit.** If a single
    sub-problem (a shell, a tool, a payload) eats >15 min or >10 tool calls
-   without progress, stop pushing THAT sub-problem -- not the box. Leave a
-   breadcrumb (`note stuck '<what, tried, why>'`), then move to a different lead:
-   another identity, another service, or research the exact error symptom.
+   without progress, stop pushing THAT sub-problem -- not the engagement. Leave
+   a breadcrumb (`note stuck '<what, tried, why>'`), then move to a different
+   lead: another identity, another host, another service, or research the exact
+   error symptom.
 6. **Writing custom exploit code = you skipped something — UNLESS it's a web
    exploit chain.** XSS payloads, SSTI chains, deserialization gadgets, and
    bot-interaction scripts (CSP bypasses, CSRF, SSRF callbacks) are EXPECTED
@@ -66,23 +70,33 @@ with the access and tools you already have.
    writing a custom protocol client, network exploit, or binary exploit, you
    have almost certainly missed a simpler path. STOP and check: did you fully
    enumerate the web app (ffuf, nikto, whatweb, CMS-specific scans)? Did you
-   search every service version for CVEs? On easy/medium boxes, the foothold
-   uses existing tools and known techniques. Go back to Phase 1 step 1.
+   search every service version for CVEs? Go back to Phase 1 step 1.
 7. **Kernel exploits = last resort.** If you are compiling a kernel exploit,
    you have almost certainly skipped a simpler user-space privesc. STOP and
    check: did you run `sudo -l`? Check SUID binaries? Check installed
    package versions for known CVEs (`dpkg -l`, `rpm -qa`)? Check polkit,
-   packagekit, snapd, pkexec? On easy/medium boxes, privesc is a
-   misconfigured service or a vulnerable user-space package — not a kernel
-   bug. Exhaust Phase 3 step 4a-e before touching 4f.
+   packagekit, snapd, pkexec? Exhaust Phase 3 step 4a-e before touching 4f.
 8. **Never re-run a command you've already run.** You already have its output,
    whether it succeeded or failed -- running it again tells you nothing new. If
    the result didn't move you forward, change the method, tool, or inputs, or
    move to a different lead. Re-running the same command IS a loop.
-8. **A reboot is a legitimate tool.** Lab VMs revert to a snapshot on reboot.
+9. **A reboot is a legitimate tool.** Lab VMs revert to a snapshot on reboot.
    When an interactive channel is deadlocked and you cannot restart its
    service, rebooting is faster than fighting it.
-9. **Keep the state board current.** See *Working state* below.
+10. **Every compromised host is a pivot point.** Don't just loot it — ask what
+   NEW hosts, segments, or services you can reach FROM it that you couldn't
+   before. Run `arp -a`, `ip route`, `netstat -antp`, check internal DNS, and
+   ping-sweep adjacent subnets. Record new reachability with
+   `note campaign '<host> can reach <segment/host>'` and set up a pivot if
+   needed (load the `pivoting` skill).
+11. **Track the attack graph.** On a network engagement, the path from initial
+   access to domain admin is a GRAPH, not a line. Use `note campaign` to record
+   host-to-host progression, trust relationships, and which credentials unlock
+   which hosts. Use `note pivot` to track active tunnels. Use
+   `wiki add hosts/<ip>` for per-host detail. Before picking your next target,
+   review the campaign section -- the shortest path to DA may go through a host
+   you haven't looked at yet.
+12. **Keep the state board current.** See *Working state* below.
 
 ## Working state -- `notes/STATE.md`
 - Read `notes/STATE.md` (`note show`) at the start, FIRST after any
@@ -100,7 +114,18 @@ with the access and tools you already have.
       note rm next 'ESC1'            # drop a bullet once done or wrong
   Text containing a `'`: pass it on stdin instead (`note cred <<'EOF'` ...
   `EOF`). `note` echoes what it stored -- check secrets came through intact.
-- Sections: scope access cred service finding parked next stuck.
+- **Campaign section** -- the network map: which hosts are compromised, which
+  segments are reachable from where, domain trust direction, DC locations.
+  Update after every pivot or new host compromise:
+      note campaign 'WEB01 (10.10.110.5) owned -- can reach 10.10.110.0/24 (server VLAN)'
+      note campaign 'CORP.LOCAL trusts DEV.LOCAL (bidirectional)'
+      note campaign 'DC01 = 10.10.110.10, DC02 = 10.10.110.11 (CORP.LOCAL)'
+- **Pivot section** -- active tunnels and what they unlock:
+      note pivot 'chisel SOCKS via WEB01:8080 -> 10.10.110.0/24 (server VLAN)'
+      note pivot 'ssh -L 5985:DC01:5985 via FILE01 -- WinRM to DC01'
+- Per-host detail (ports, services, loot, privesc notes) goes in the wiki:
+  `wiki add hosts/<ip> '<detail>'`. The campaign section stays HIGH-LEVEL.
+- Sections: scope campaign access pivot cred service finding parked next stuck.
 - After 3 failed attempts on the SAME vector, record it with
   `note stuck '<what, what you tried, why each failed>'` and then SWITCH to a
   different lead. This is a breadcrumb (it also lands in notes/STUCK.md for later
@@ -113,14 +138,14 @@ with the access and tools you already have.
 
 ## Lessons -- `lessonsLearned.md` (candidates for the knowledge base)
 Separate from working notes. Write a lesson with the `lesson` CLI when, and
-ONLY when, it will hold on the NEXT box with the same fingerprint:
+ONLY when, it will hold on the NEXT engagement with the same fingerprint:
 - a reference said X would work and it didn't (record why),
 - something worked that no reference covered,
 - a stuck period got resolved (what unblocked it),
 - a tool/wrapper misbehaved (that's an `env` lesson).
     lesson privesc technique 'GTFOBins less trick needs no tty here' --fp 'Ubuntu 22.04, sudo less' --dest '@linux'
-NOT a lesson: anything true only on THIS box -- that goes in the wiki or notes.
-At the end of a box, run `/retro` to capture one closing lesson.
+NOT a lesson: anything true only on THIS target -- that goes in the wiki or notes.
+At the end of an engagement, run `/retro` to capture one closing lesson.
 
 ## Assessment write-up -- `ASSESSMENT.md` (for the human report)
 When you CONFIRM something reportable (foothold, valid cred, exploitable vuln),
@@ -129,30 +154,46 @@ append an entry -- what it is, impact, exact repro, evidence path:
 Terse operational state stays in STATE.md; don't mix the two.
 
 ## Capturing flags -- `flag`
-When you read a flag hash, record it immediately:
-    flag user <hash>
-    flag root <hash>
+When you read a flag hash, record it immediately with any descriptive label:
+    flag user <hash>                  # single-box user flag
+    flag root <hash>                  # single-box root flag
+    flag DC01 <hash>                  # Pro Lab: flag from DC01
+    flag "YOURFLAG01" <hash>          # Pro Lab: named flag
+    flag web01-user <hash>            # network: user-level on web01
 This saves the hash to `loot/flags.txt`, writes an ASSESSMENT.md entry, and
-notes the access level on the state board -- all in one command.
+notes the capture on the state board -- all in one command.
 `spray` also auto-assesses when it confirms admin access (Pwn3d!).
 
 ---
 
 ## Core Methodology: Enumerate -> Capability-Map -> Research -> Exploit
 
-### Phase 1: Enumerate the target
-Discover open ports, services, and version strings:
+### Phase 1: Enumerate the attack surface
+**On a network (Pro Lab, multi-host):** start with the range, not a single host.
+Identify all live hosts and key infrastructure before diving into any one box:
 ```bash
-safe-run nmap -sCV -Pn -oA /workspace/loot/initial <TARGET>
+# Discover live hosts (fast)
+safe-run nmap -sn -oA /workspace/loot/pingsweep <RANGE>
+# Top-ports across the range to find DCs, web servers, databases
+safe-run nmap -sV -Pn --top-ports 20 -oA /workspace/loot/range-top20 <RANGE>
 ```
-Record every service name and version number (e.g. `Apache 2.4.49`,
-`OpenSSH 8.2p1`, `ProFTPD 1.3.5`).
+Identify DCs (88/389/636 open), web servers (80/443), databases (1433/3306),
+file servers (445 with lots of shares). Record them:
+```
+note campaign 'DC01=10.10.110.10 (88,389,445,636), WEB01=10.10.110.5 (80,445)'
+```
+
+**Per host** (single box or one host from the range): full service enumeration.
+```bash
+safe-run nmap -sCV -Pn -oA /workspace/loot/<hostname>-full <TARGET>
+```
+Record every service name and version number. Use `wiki add hosts/<ip>` for
+per-host detail; use `note service` for the board summary.
 
 **Attack surface priority (work top to bottom):**
 1. **Web apps** (HTTP/HTTPS ports) — load `web-recon` skill, run whatweb/nikto,
-   directory-brute with ffuf, check for known CMS vulns. On easy/medium boxes
-   the foothold is almost always here. DO NOT move to step 3 until you have
-   thoroughly enumerated every web app.
+   directory-brute with ffuf, check for known CMS vulns. DO NOT move to step 3
+   until you have thoroughly enumerated every web app.
 2. **Known CVEs** in identified service versions — searchsploit + websearch for
    every `<service> <version>` pair.
 3. **Non-standard / unusual services** — only AFTER steps 1-2 are exhausted.
@@ -172,7 +213,7 @@ safe-run nuclei -u <TARGET> -as                     # auto-detect + scan
 ```
 
 ### Phase 3: Post-foothold sweep (MANDATORY for every new identity)
-Every foothold's job is finding the NEXT identity or privilege level.
+Every foothold's job is finding the NEXT identity, host, or privilege level.
 Flags come from reaching the right account -- hunt credentials, not files.
 
 Run this for EVERY new credential, shell, token, or file access:
@@ -180,8 +221,9 @@ Run this for EVERY new credential, shell, token, or file access:
 2. **Credential material on this host**: config files, stored creds, hashes,
    keys, tokens, memory dumps, browser data, DPAPI, SSH keys, `.kdbx`.
    Flag `.vmem/.vhd/.kirbi/Unattend.xml/GPP` files, scripts, backups.
-3. **What can this identity reach?** `spray <host> '<secret>'` the whole roster,
-   then `nxc smb <T> -u <U> -p <P> --shares` and LIST every readable share.
+3. **What can this identity reach?** `spray <host> '<secret>'` the whole roster
+   ACROSS EVERY reachable host (not just the current one), then
+   `nxc smb <T> -u <U> -p <P> --shares` and LIST every readable share.
    Check: does this identity get `Pwn3d!` on any target the previous didn't?
 4. **Local privesc paths (work top to bottom — user-space first):**
    a. `sudo -l` / `sudo -n -l` — sudoers entries
@@ -191,20 +233,57 @@ Run this for EVERY new credential, shell, token, or file access:
    e. Cron/timers, writable service binaries, PATH hijack
    f. Kernel exploits — LAST resort, only after a-e are exhausted
 5. **AD rights** (if domain-joined): ACLs on other objects, delegation, group
-   membership -> load `@ad` for the ACL-to-attack matrix
-6. **Then check flags**: read the hash and record it with `flag user <hash>`
-   or `flag root <hash>` -- but only AFTER steps 1-5. The flag is a byproduct
-   of having the right access.
+   membership -> load `@ad` for the ACL-to-attack matrix. Run BloodHound
+   collection (`bloodhound-python -c all`) and analyze — load `@bloodhound`.
+6. **Network reachability (critical on multi-host engagements):**
+   What can I reach FROM here that I couldn't before?
+   - `arp -a` / `ip neigh` — hosts on the local segment
+   - `ip route` / `route print` — known routes and gateways
+   - `netstat -antp` / `ss -tlnp` — connections to/from internal hosts
+   - Internal DNS: `nslookup` / zone transfers / ADIDNS entries
+   - Ping sweep adjacent subnets: `for i in $(seq 1 254); do ping -c1 -W1 10.10.110.$i; done`
+   Record new reachability: `note campaign '<host> -> reaches <segment>'`.
+   If you found new hosts, set up a pivot (load `pivoting` skill) and scan them.
+7. **Then check flags**: read the hash and record it with `flag <label> <hash>`
+   -- but only AFTER steps 1-6. The flag is a byproduct of having the right
+   access.
 
 Record each finding: `note finding '<principal> -> <right> -> <attack>'`.
 
-### Phase 4: Exploit the most promising lead
+**When to pivot vs stay local:** Pivot AFTER you've looted the current host's
+credential material (step 2) and checked local privesc (step 4). Don't leave
+creds on the table, but don't rabbit-hole on a privesc when a cred you already
+have opens a door somewhere else on the network.
+
+### Phase 4: Network progression (multi-host engagements)
+On a network, the path to domain admin is a GRAPH. After each foothold sweep:
+1. **Review the campaign map** (`note show`, campaign section): which hosts are
+   owned, which are reachable, which credentials work where?
+2. **Plan the next hop**: use BloodHound data (`@bloodhound`) + trust
+   enumeration to find the shortest path to DA. Prioritize:
+   - Hosts where an owned identity has local admin (Pwn3d!)
+   - Hosts with sessions from high-value users (DA, Enterprise Admin)
+   - Cross-domain trust abuse (SID history, cross-domain group membership)
+   - ADCS relay opportunities (ESC8: coerce + relay to get a cert)
+3. **Relay attacks**: when you have NTLM coercion (PetitPotam, PrinterBug,
+   DFSCoerce via `coercer`) + a relay target (ADCS HTTP enrollment, LDAP
+   without signing, SMB without signing), set up `impacket-ntlmrelayx` and
+   trigger the coercion. Load `@adcs` for ESC8 specifics.
+4. **Credential reuse at scale**: every new password/hash gets sprayed across
+   the ENTIRE roster on EVERY reachable host. `spray` handles one host at a
+   time — run it against each DC and key server.
+5. **Domain trusts**: enumerate with `nxc smb <DC> -M enum_trusts` or
+   `bloodhound-python`. If Domain A trusts Domain B, compromise of B can lead
+   to A via SID history injection, cross-domain resource abuse, or shared
+   admin accounts.
+
+### Phase 5: Exploit the most promising lead
 If it fails, go back to Phase 2 with different search terms (product name,
 protocol, vulnerability class). Do NOT retry unchanged.
 
-### Phase 5: External research (only after local sources exhausted)
+### Phase 6: External research (only after local sources exhausted)
 Use `websearch` to search the web — it hits a local SearXNG instance (no
-CAPTCHA, no bot-blocking). Never search for the box name, walkthrough, or
+CAPTCHA, no bot-blocking). Never search for the lab name, walkthrough, or
 writeup. Good searches: `<service> <version> CVE`, exact error strings,
 technique names.
 ```bash
@@ -221,6 +300,7 @@ websearch --url 'https://...'           # fetch and extract text from a URL
 | Skill | When to use |
 |---|---|
 | `pentest-loop` | Start of engagement or when progress stalls |
+| `network-recon` | Initial network enumeration, or when pivoting to a new segment |
 | `capability-enumeration` | After gaining any foothold (cred, shell, ticket, file) |
 | `research-symptom` | When an exploit fails or a tool errors |
 | `shell-and-transfer` | Catching a shell, uploading/downloading, or when a shell dies |
@@ -235,6 +315,7 @@ websearch --url 'https://...'           # fetch and extract text from a URL
 |---|---|
 | `@ad` | Attacking AD domains: ACL abuse matrix, Kerberos errors/tgtdeleg, dMSA/badSuccessor, RBCD, shadow credentials, delegation, tombstone reanimation |
 | `@adcs` | Certificate attacks: ADCS ESC1-16 with certipy commands |
+| `@bloodhound` | BloodHound collection, headless analysis (jq queries on JSON), attack path planning, domain trust enumeration |
 | `@windows` | Windows lateral movement, execution methods, flag/secret locations |
 | `@linux` | Linux privilege escalation: SUID, sudo, capabilities, cron, kernel |
 | `@forensics` | Memory/disk image credential extraction: volatility3, offline hive dumps |
@@ -256,12 +337,16 @@ The MCP server's parameter parsing can be strict. For complex chains:
 2. Execute via `safe-run msfconsole -q -r script.rc`.
 
 ## Networking Constraints
-- **Scope**: only attack IPs in `scope.txt`.
+- **Scope**: only attack IPs in `scope.txt`. On a network engagement, scope
+  may be a CIDR range -- add it once and `scope_check` handles membership.
 - **LHOST**: use the VPN IP, never the container `10.88.x.x` IP.
 - **LPORT**: bind to forwarded ports: 80, 443, 445, 4444-4460, 8080-8090.
   Use 4444-4460 for reverse shells, 80/443 for HTTP callbacks and relay
   attacks, 8080-8090 for chisel/ligolo/HTTP staging.
 - **Payload delivery**: if inbound ports are blocked, stage via SMB shares.
+- **Lab subnets**: the container allows outbound traffic to subnets configured
+  via `LAB_SUBNETS` env var (default: `10.10.0.0/16,10.129.0.0/16`). Pro Labs
+  may use different ranges — set `LAB_SUBNETS` before launching.
 
 ---
 
@@ -290,6 +375,10 @@ Load `@env` for NAT/routing gotchas when setting up tunnels.
 - **pypykatz**: parse LSASS dumps on Linux without volatility.
 - **PKINITtools**: `gettgtpkinit.py`, `gets4uticket.py` for cert-based auth.
 - **petitpotam.py**: NTLM coercion for ADCS relay attacks.
+- **coercer**: multi-method NTLM coercion (PetitPotam, PrinterBug, DFSCoerce,
+  ShadowCoerce, and more) -- broader coverage than petitpotam.py alone.
+- **impacket-ntlmrelayx**: NTLM relay to LDAP, SMB, HTTP (ADCS), MSSQL.
+  Combine with coercion for ESC8, RBCD relay, shadow cred relay.
 - **websearch**: `websearch '<query>'` — local SearXNG search, no bot-blocking.
   `websearch --url '<url>'` fetches and extracts text. Use instead of `curl`ing
   search engines directly.

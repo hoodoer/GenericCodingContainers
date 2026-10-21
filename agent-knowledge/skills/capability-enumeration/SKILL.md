@@ -17,9 +17,12 @@ ignore is often the one that has the access you need.
 
 **Before the per-account checks below, spray the new secret across everyone:**
 `spray <dc-or-host> '<secret>'` tests it against the whole account roster in one
-call and records the hits. `roster show` tells you which identities you still
-haven't tested -- untested accounts are unexplored attack surface, so don't
-declare a box stuck while any remain.
+call and records the hits. **On a network, spray against EVERY known host** --
+not just the one you found the cred on. A password that doesn't work on HOST-A
+may work on HOST-B. Run `spray` once per target host, or at minimum against the
+DC and every host with SMB/WinRM open. `roster show` tells you which identities
+you still haven't tested -- untested accounts are unexplored attack surface, so
+don't declare a box stuck while any remain.
 
 ### Step 1: Simple access first (before any AD attack chain)
 - `nxc smb <T> -u <U> -p '<P>' --shares` -- list shares, then **actually
@@ -43,6 +46,17 @@ declare a box stuck while any remain.
   the missing template as ESC1-vulnerable. Load `@adcs` for the full
   technique.
 - Run BloodHound collection: `bloodhound-python -d <dom> -u <user> -p '<pass>' -dc <DC> -c all`
+- **Cross-domain trust paths**: if there are multiple domains, check whether
+  this identity has rights in another domain (SID history, cross-domain group
+  membership, trust abuse). Load `@bloodhound` for headless analysis of edges
+  across domains.
+
+### Step 3: Network reachability (multi-host engagements)
+- Test this credential against EVERY known host: `spray <host> '<secret>'`
+  for each DC, file server, and host with SMB/WinRM open.
+- A `Pwn3d!` on a new host = new attack surface. Connect, enumerate that
+  host, and look for credentials that take you further.
+- Record: `note campaign 'cred <user> -> admin on <host>'`.
 
 ## For a low-priv shell
 - `whoami /priv` / `id` / `sudo -l` -- privileges change what's possible
@@ -53,6 +67,34 @@ declare a box stuck while any remain.
 - Stored creds: browsers, DPAPI, `Unattend.xml`, GPP `Groups.xml`, `.kdbx`,
   SSH keys, service configs, scheduled tasks, cron, SUID binaries.
 - Running services and listening ports reachable ONLY from this host.
+
+### Network reachability (from every new shell)
+Every shell is a potential pivot point. Before moving on, check what this
+host can reach that you can't:
+```bash
+# Interfaces and routes — dual-homed hosts bridge networks
+ip addr; ip route          # Linux
+ipconfig /all; route print # Windows
+
+# Neighbors and ARP cache — what's alive nearby
+arp -a
+ip neigh                   # Linux
+
+# Internal listeners and connections — reveals internal services
+netstat -tlnp 2>/dev/null || ss -tlnp   # Linux
+netstat -ano                             # Windows
+
+# Quick ping sweep of adjacent subnets (if ICMP allowed)
+for i in $(seq 1 254); do ping -c1 -W1 172.16.1.$i &>/dev/null && echo "172.16.1.$i alive"; done
+# Or from Windows: 1..254 | %{ if (Test-Connection 172.16.1.$_ -Count 1 -Quiet) { "172.16.1.$_ alive" } }
+
+# DNS — internal hostnames reveal architecture
+cat /etc/resolv.conf; nslookup <domain>
+# Windows: ipconfig /all (DNS servers), nslookup -type=any <domain>
+```
+If this host sees a segment you can't reach: set up a pivot (load `pivoting`
+skill). Record: `note pivot '<tool> via <host> -> <subnet> (<what it reaches>)'`
+and `note campaign 'shell on <host> -> sees <subnet>'`.
 
 ## For a file / share
 - List contents of every share with every identity; map share ACLs, not just

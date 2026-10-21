@@ -86,7 +86,7 @@ RUN apt-get remove -y python3-minikerberos 2>/dev/null || true \
     && pip3 install --no-cache-dir --break-system-packages \
       "mcp[cli]<2" certipy-ad bloodhound ldap3 requests \
       aardwolf pyrdp \
-      pypykatz \
+      pypykatz coercer \
     && pip3 install --no-cache-dir --break-system-packages --no-deps pywhisker \
     && pip3 cache purge
 

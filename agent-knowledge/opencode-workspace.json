@@ -8,7 +8,7 @@
   "references": {
     "ad": {
       "path": "references/active-directory",
-      "description": "Active Directory attack reference: ACL-right to attack-primitive matrix, Kerberos ticket errors and tgtdeleg, dMSA/badSuccessor abuse, RBCD, shadow credentials, delegation, tombstone reanimation, BloodHound queries. Use when attacking AD/Windows domains or when Kerberos errors appear."
+      "description": "Active Directory attack reference: ACL-right to attack-primitive matrix, NTLM relay attacks (coercion + ntlmrelayx), cross-domain trust abuse, Kerberos ticket errors and tgtdeleg, dMSA/badSuccessor abuse, RBCD, shadow credentials, delegation, tombstone reanimation, BloodHound collection and headless analysis. Use when attacking AD/Windows domains, relaying authentication, abusing trusts, or when Kerberos errors appear."
     },
     "adcs": {
       "path": "references/adcs",
@@ -33,6 +33,10 @@
     "web": {
       "path": "references/web",
       "description": "Web application and API attacks: directory/vhost/parameter fuzzing, SQLi, NoSQLi, SSTI, SSRF, XXE, JWT, LFI/RFI, file upload bypass, GraphQL, brute force, WebSocket testing, nuclei scanning, wordlist paths. Use when attacking web apps or APIs."
+    },
+    "bloodhound": {
+      "path": "references/bloodhound",
+      "description": "BloodHound collection, headless JSON analysis (jq queries without the GUI), attack path planning, domain trust enumeration, network engagement workflow. Use when planning AD attack paths, analyzing BloodHound data, or mapping multi-domain environments."
     }
   }
 }
